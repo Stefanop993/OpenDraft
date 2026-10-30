@@ -22,6 +22,7 @@ import {
   commandTools, createPreviewAdapter, createTiptapAdapter, executeCommand, getCommand,
   type PreviewOp, type ScriptContext,
 } from '../commands';
+import { parseQuickDialogue } from '../services/ai/quickIntent';
 import {
   callModel,
   listModels,
@@ -282,6 +283,20 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
         }
         return true;
       };
+
+      // A simple "X dice: ..." is deterministic: no model, no waiting.
+      const quick = parseQuickDialogue(prompt, context?.characters ?? []);
+      if (quick) {
+        const staged = stageCalls(adapter, [{
+          name: 'script.insertDialogue',
+          args: { character: quick.character, text: quick.text },
+        }]);
+        if (!finishStaged(staged)) {
+          setError('Non ho potuto preparare il dialogo.');
+          addMessage('assistant', 'Non ho potuto preparare il dialogo.');
+        }
+        return;
+      }
 
       const openAiCompatible = settings.provider !== 'ollama';
       // The OpenAI-compatible path sends no history: a small local model tends
