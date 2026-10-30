@@ -304,6 +304,33 @@
        leave the line and the text is raised, so the scene navigator, Word and Final Draft exports read the
        same as the page. Scripts written before this are normalised on their next save or export.</p>
 
+    <h2 id="ai-assistant">AI Assistant (local)</h2>
+
+    <p>The robot button in the toolbar opens the assistant. Ask in plain language &mdash; for example
+       &ldquo;Scrivi un dialogo di Ben che dice &lsquo;Ciao a tutti&rsquo;&rdquo; &mdash; and the script is
+       changed through OpenDraft&rsquo;s own commands. The model never pastes text: it asks the app to insert
+       a cue and a line, so the formatting is always the screenplay&rsquo;s.</p>
+
+    <h3>Ollama</h3>
+    <ol>
+      <li>Install Ollama and start it (<code>ollama serve</code>).</li>
+      <li>Download a model that can call tools, e.g. <code>ollama pull qwen2.5</code>.</li>
+      <li>In the assistant&rsquo;s settings choose <strong>Ollama</strong>, the server
+          <code>http://localhost:11434</code>, and the model.</li>
+      <li>If the request is refused for CORS, start Ollama with <code>OLLAMA_ORIGINS=*</code>.</li>
+    </ol>
+
+    <h3>Unsloth Studio, LM Studio, llama.cpp</h3>
+    <p>Choose <strong>OpenAI-compatible</strong> and use the server&rsquo;s <code>/v1</code> address &mdash;
+       Unsloth Studio exposes <code>http://localhost:8080/v1</code>, LM Studio
+       <code>http://localhost:1234/v1</code>. In this mode the model answers with one JSON action
+       (<code>{"tool":"script.insertDialogue","args":{...}}</code>) and the app runs it, so tool calling does
+       not need to be supported by the server.</p>
+
+    <p>The conversation stays in the panel for the session and is not saved with the script. Everything runs
+       on your machine unless you configure a remote server; an API key, when one is needed, is kept in this
+       device&rsquo;s local storage.</p>
+
     <h2 id="handwriting">Handwriting with an Apple Pencil (iPad)</h2>
 
     <p>
