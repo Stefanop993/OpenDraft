@@ -124,6 +124,19 @@ describe('the other editorial commands', () => {
     expect(calls.blocks[0][0].text.length).toBe(20_000);
   });
 
+  it('accepts the parameter names local models tend to use', () => {
+    const { adapter, calls } = fakeAdapter();
+    executeCommand('script.insertAction', { action: 'Rain on the glass.' }, adapter);
+    executeCommand('script.insertDialogue', { name: 'ben', line: 'Ciao.' }, adapter);
+    executeCommand('script.insertScene', { sceneHeading: 'int. a - day' }, adapter);
+    expect(calls.blocks[0][0]).toEqual({ type: 'action', text: 'Rain on the glass.' });
+    expect(calls.blocks[1]).toEqual([
+      { type: 'character', text: 'BEN', extension: undefined },
+      { type: 'dialogue', text: 'Ciao.' },
+    ]);
+    expect(calls.blocks[2][0]).toEqual({ type: 'sceneHeading', text: 'INT. A - DAY' });
+  });
+
   it('undoes and redoes', () => {
     const { adapter, calls } = fakeAdapter();
     executeCommand('editor.undo', {}, adapter);

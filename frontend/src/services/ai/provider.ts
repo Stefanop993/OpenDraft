@@ -8,9 +8,9 @@
  *   passed back as they came.
  * - **OpenAI-compatible** (`/v1/chat/completions`) covers Unsloth Studio
  *   (`http://localhost:8080/v1`), LM Studio, llama.cpp and any hosted endpoint.
- *   Tool calling through those servers is inconsistent, so this route uses a
- *   JSON reply instead: the model answers with
- *   `{"tool":"script.insertDialogue","args":{...}}` and the panel executes it.
+ *   It sends the tools natively when the server accepts them (Unsloth Studio
+ *   does). Servers that reject `tools` are retried without them, and the model
+ *   answers with `{"tool":"script.insertDialogue","args":{...}}` instead.
  *
  * Nothing here knows about the editor or React. It sends messages, returns a
  * normalized reply, and turns a model's JSON into tool calls.
@@ -84,6 +84,17 @@ async function readError(response: Response): Promise<string> {
   return `HTTP ${response.status}${body ? `: ${body}` : ''}`;
 }
 
+/** A readable error; 401/403 get the one instruction that fixes them. */
+async function httpError(response: Response): Promise<Error> {
+  if (response.status === 401 || response.status === 403) {
+    return new Error(
+      'Il server richiede una API key. Copiala da Unsloth Studio (o dal tuo server) e '
+      + 'incollala nel campo "API key" nelle impostazioni dell\'assistente.',
+    );
+  }
+  return new Error(await readError(response));
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -114,6 +125,11 @@ export function ollamaToolCalls(raw: unknown): AiToolCall[] {
   return calls;
 }
 
+/** Normalize an OpenAI-compatible tool_calls list. Exported for tests. */
+export function openaiToolCalls(raw: unknown): AiToolCall[] {
+  return ollamaToolCalls(raw);
+}
+
 async function callOllama(
   settings: AiSettings,
   messages: AiChatMessage[],
@@ -141,7 +157,7 @@ async function callOllama(
       body: JSON.stringify(body),
     });
   }
-  if (!response.ok) throw new Error(await readError(response));
+  if (!response.ok) throw await httpError(response);
   const data = asRecord(await response.json());
   const message = asRecord(data.message);
   const content = typeof message.content === 'string' ? message.content : '';
@@ -160,20 +176,38 @@ async function callOllama(
 async function callOpenAICompatible(
   settings: AiSettings,
   messages: AiChatMessage[],
+  tools: ToolDefinition[],
 ): Promise<AiReply> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (settings.apiKey.trim()) headers.Authorization = `Bearer ${settings.apiKey.trim()}`;
-  const response = await fetch(endpoint(settings), {
+  const body: Record<string, unknown> = {
+    model: settings.model,
+    messages: messages.map(({ role, content }) => ({ role, content })),
+    // Low temperature: in this mode the reply is a JSON action, not prose.
+    temperature: 0.1,
+    stream: false,
+  };
+  if (tools.length > 0) {
+    body.tools = tools;
+    body.tool_choice = 'auto';
+  }
+  let response = await fetch(endpoint(settings), {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      model: settings.model,
-      messages: messages.map(({ role, content }) => ({ role, content })),
-      temperature: 0.3,
-      stream: false,
-    }),
+    body: JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(await readError(response));
+  // Unsloth Studio and some other local servers reject native tools; retry
+  // without them, and the system prompt's JSON fallback takes over.
+  if (!response.ok && tools.length > 0 && (response.status === 400 || response.status === 404)) {
+    delete body.tools;
+    delete body.tool_choice;
+    response = await fetch(endpoint(settings), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+  }
+  if (!response.ok) throw await httpError(response);
   const data = asRecord(await response.json());
   const choices = Array.isArray(data.choices) ? data.choices : [];
   const message = asRecord(asRecord(choices[0]).message);
@@ -184,7 +218,7 @@ async function callOpenAICompatible(
       : '';
   return {
     content,
-    toolCalls: [],
+    toolCalls: openaiToolCalls(message.tool_calls),
     assistantMessage: { role: 'assistant', content },
   };
 }
@@ -200,7 +234,7 @@ export async function callModel(
   try {
     return settings.provider === 'ollama'
       ? await callOllama(settings, messages, tools)
-      : await callOpenAICompatible(settings, messages);
+      : await callOpenAICompatible(settings, messages, tools);
   } catch (err) {
     if (err instanceof Error && /^HTTP /.test(err.message)) throw err;
     throw new Error(describeNetworkError(settings, err));
@@ -215,7 +249,7 @@ export async function listModels(settings: AiSettings): Promise<string[]> {
   const headers: Record<string, string> = {};
   if (settings.apiKey.trim()) headers.Authorization = `Bearer ${settings.apiKey.trim()}`;
   const response = await fetch(url, { headers });
-  if (!response.ok) throw new Error(await readError(response));
+  if (!response.ok) throw await httpError(response);
   const data = asRecord(await response.json());
   if (settings.provider === 'ollama') {
     return (Array.isArray(data.models) ? data.models : [])

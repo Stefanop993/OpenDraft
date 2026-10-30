@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   normalizeBaseUrl,
   ollamaToolCalls,
+  openaiToolCalls,
   parseJsonActions,
   toolResultMessage,
 } from './provider';
@@ -35,6 +36,16 @@ describe('ollamaToolCalls', () => {
   it('returns nothing for a reply without calls', () => {
     expect(ollamaToolCalls(undefined)).toEqual([]);
     expect(ollamaToolCalls({})).toEqual([]);
+  });
+});
+
+describe('openaiToolCalls', () => {
+  it('reads the OpenAI tool_calls shape, string arguments included', () => {
+    expect(openaiToolCalls([
+      { id: 'call_1', function: { name: 'script_insertDialogue', arguments: '{"character":"BEN","text":"Ciao"}' } },
+    ])).toEqual([
+      { name: 'script_insertDialogue', args: { character: 'BEN', text: 'Ciao' } },
+    ]);
   });
 });
 

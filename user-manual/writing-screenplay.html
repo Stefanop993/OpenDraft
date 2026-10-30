@@ -323,13 +323,18 @@
     <h3>Unsloth Studio, LM Studio, llama.cpp</h3>
     <p>Choose <strong>OpenAI-compatible</strong> and use the server&rsquo;s <code>/v1</code> address &mdash;
        Unsloth Studio exposes <code>http://localhost:8080/v1</code>, LM Studio
-       <code>http://localhost:1234/v1</code>. In this mode the model answers with one JSON action
+       <code>http://localhost:1234/v1</code>. OpenDraft sends the tools natively; if the server does not
+       accept them, the model answers with one JSON action
        (<code>{"tool":"script.insertDialogue","args":{...}}</code>) and the app runs it, so tool calling does
-       not need to be supported by the server.</p>
+       not need to be supported.</p>
 
     <p>The conversation stays in the panel for the session and is not saved with the script. Everything runs
        on your machine unless you configure a remote server; an API key, when one is needed, is kept in this
        device&rsquo;s local storage.</p>
+
+    <p>The quality depends on the model. For real use choose an instruct model of 7B or more
+       (Qwen2.5-7B-Instruct, Llama 3.1 8B): 3B models can attribute a line to the wrong character or leave
+       out the text of an action.</p>
 
     <h2 id="handwriting">Handwriting with an Apple Pencil (iPad)</h2>
 

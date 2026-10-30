@@ -37,9 +37,27 @@ function elementArg(args: Record<string, unknown>, key: string): CommandElement 
   return (ELEMENTS as readonly string[]).includes(raw) ? (raw as CommandElement) : null;
 }
 
+/**
+ * The first non-empty string among several names. Local models regularly use
+ * `action` for an action's text or `line` for a dialogue's, even when the tool
+ * schema says `text`; accepting the synonyms costs nothing and turns a
+ * "required text" failure into the line the writer asked for.
+ */
+function firstText(
+  args: Record<string, unknown>,
+  keys: readonly string[],
+  max = MAX_TEXT,
+): string | null {
+  for (const key of keys) {
+    const text = textArg(args, key, max);
+    if (text) return text;
+  }
+  return null;
+}
+
 /** "(V.O.)", "(v.o.)" and "V.O." all become "(V.O.)". */
 function extensionArg(args: Record<string, unknown>): string | null {
-  const raw = args.extension;
+  const raw = args.extension ?? args.cueExtension;
   if (typeof raw !== 'string') return null;
   const inner = raw.trim().replace(/^\((.*)\)$/, '$1').trim();
   if (!inner) return null;
@@ -48,7 +66,7 @@ function extensionArg(args: Record<string, unknown>): string | null {
 
 /** "beat" and "(beat)" both become "(beat)". */
 function parentheticalArg(args: Record<string, unknown>): string | null {
-  const raw = args.parenthetical;
+  const raw = args.parenthetical ?? args.direction;
   if (typeof raw !== 'string') return null;
   const inner = raw.trim().replace(/^\((.*)\)$/, '$1').trim();
   if (!inner) return null;
@@ -76,8 +94,8 @@ export function registerScreenplayCommands(): void {
       additionalProperties: false,
     },
     run: ({ adapter }, args) => {
-      const character = textArg(args, 'character', MAX_NAME);
-      const text = textArg(args, 'text');
+      const character = firstText(args, ['character', 'name', 'speaker'], MAX_NAME);
+      const text = firstText(args, ['text', 'line', 'dialogue']);
       if (!character) return { ok: false, message: 'A character name is required.' };
       if (!text) return { ok: false, message: 'The dialogue text is required.' };
       const extension = extensionArg(args);
@@ -107,7 +125,7 @@ export function registerScreenplayCommands(): void {
       additionalProperties: false,
     },
     run: ({ adapter }, args) => {
-      const text = textArg(args, 'text');
+      const text = firstText(args, ['text', 'action', 'description']);
       if (!text) return { ok: false, message: 'The action text is required.' };
       adapter.insertBlocks([{ type: 'action', text }]);
       return { ok: true, message: 'Inserted the action line.', data: { blocks: [{ type: 'action', text }] } };
@@ -129,9 +147,9 @@ export function registerScreenplayCommands(): void {
       additionalProperties: false,
     },
     run: ({ adapter }, args) => {
-      const heading = textArg(args, 'heading');
+      const heading = firstText(args, ['heading', 'sceneHeading', 'slugline']);
       if (!heading) return { ok: false, message: 'A scene heading is required.' };
-      const action = textArg(args, 'action');
+      const action = firstText(args, ['action', 'text', 'description']);
       const blocks: BlockSpec[] = [{ type: 'sceneHeading', text: heading.toUpperCase() }];
       if (action) blocks.push({ type: 'action', text: action });
       adapter.insertBlocks(blocks);
@@ -150,7 +168,7 @@ export function registerScreenplayCommands(): void {
       additionalProperties: false,
     },
     run: ({ adapter }, args) => {
-      const text = textArg(args, 'text', 200);
+      const text = firstText(args, ['text', 'transition'], 200);
       if (!text) return { ok: false, message: 'The transition text is required.' };
       adapter.insertBlocks([{ type: 'transition', text: text.toUpperCase() }]);
       return { ok: true, message: `Inserted the transition ${text.toUpperCase()}.` };
@@ -168,7 +186,7 @@ export function registerScreenplayCommands(): void {
       additionalProperties: false,
     },
     run: ({ adapter }, args) => {
-      const text = textArg(args, 'text', MAX_PARENTHETICAL);
+      const text = firstText(args, ['text', 'parenthetical', 'direction'], MAX_PARENTHETICAL);
       if (!text) return { ok: false, message: 'The direction text is required.' };
       adapter.insertBlocks([{ type: 'parenthetical', text: `(${text.replace(/^\((.*)\)$/, '$1')})` }]);
       return { ok: true, message: 'Inserted the parenthetical.' };
@@ -215,7 +233,7 @@ export function registerScreenplayCommands(): void {
       additionalProperties: false,
     },
     run: ({ adapter }, args) => {
-      const text = textArg(args, 'text');
+      const text = firstText(args, ['text', 'line']);
       if (!text) return { ok: false, message: 'The replacement text is required.' };
       const element = elementArg(args, 'element');
       adapter.replaceSelection(text, element ?? undefined);
@@ -234,7 +252,7 @@ export function registerScreenplayCommands(): void {
       additionalProperties: false,
     },
     run: ({ adapter }, args) => {
-      const text = textArg(args, 'text');
+      const text = firstText(args, ['text', 'line']);
       if (!text) return { ok: false, message: 'The text is required.' };
       adapter.insertText(text);
       return { ok: true, message: 'Inserted the text.' };

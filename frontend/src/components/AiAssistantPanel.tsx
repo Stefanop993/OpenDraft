@@ -45,19 +45,54 @@ const EXAMPLES = [
 const MAX_STEPS = 6;
 const MAX_REPLY_CHARS = 12_000;
 
-/** The instructions and the script context the model gets on every turn. */
-function systemPrompt(context: unknown): string {
+/**
+ * A small local model gets confused by eleven similarly named tools. In JSON
+ * mode the prompt lists only the six that cover writing: dialogue (which takes
+ * the optional parenthetical and extension), action, scene, transition, the
+ * element change and replacing the selection. The rest stay available to the
+ * command layer and to native-tool providers.
+ */
+const CORE_JSON_TOOLS = new Set([
+  'script_insertDialogue',
+  'script_insertAction',
+  'script_insertScene',
+  'script_insertTransition',
+  'editor_setElement',
+  'editor_replaceSelection',
+]);
+
+/**
+ * The instructions and the script context the model gets on every turn.
+ *
+ * A model that is told "use a tool, or JSON if you cannot" tends to answer
+ * "Inserted …" after seeing an earlier confirmation in the conversation; then
+ * nothing is inserted. It is told that the app does the inserting, and that
+ * JSON is the reply only when no tools arrive.
+ */
+function systemPrompt(context: unknown, openAiCompatible: boolean): string {
   const tools = commandTools().tools
+    .filter((tool) => !openAiCompatible || CORE_JSON_TOOLS.has(tool.function.name))
     .map((tool) => `- ${tool.function.name}: ${tool.function.description}`)
     .join('\n');
   return [
     'Sei l\'assistente di OpenDraft, un\'app di sceneggiatura.',
     'Rispondi in italiano, in modo breve e concreto.',
-    'Per modificare il copione usa SEMPRE gli strumenti disponibili: non incollare mai testo formattato nella risposta.',
-    'Per un dialogo chiama script_insertDialogue con character e text; non aggiungere intestazioni, indentazioni o maiuscole: le gestisce l\'app.',
-    'Se non puoi chiamare gli strumenti, rispondi SOLO con JSON, senza testo attorno:',
-    '{"tool":"script_insertDialogue","args":{"character":"BEN","text":"Ciao a tutti."}}',
+    'Per modificare il copione usa gli strumenti disponibili. Se non li ricevi, rispondi SOLO con un oggetto JSON valido, senza testo attorno. Non scrivere mai frasi come "Fatto" o "Inserted": le azioni le esegue l\'app.',
+    'Per un dialogo: {"tool":"script_insertDialogue","args":{"character":"<NOME>","text":"<BATTUTA>"}}',
     'Per più azioni: {"actions":[{"tool":"...","args":{...}}, ...]}.',
+    'Usa soltanto i nomi e le battute contenuti nella richiesta: non copiare l\'esempio e non riusare battute di turni precedenti.',
+    'La battuta va al personaggio che la pronuncia nella richiesta, anche se è nuovo: non sostituirlo con un nome del contesto.',
+    'Se la richiesta dice "X dice: ..." o "X: ...", è un dialogo: usa script_insertDialogue con character X, mai un\'azione.',
+    'I nomi scritti nella richiesta valgono anche se non sono ancora nel contesto.',
+    '',
+    'Esempi (stessa forma, non copiare i contenuti):',
+    'Richiesta: "Ada dice: La porta era aperta."',
+    'Risposta: {"tool":"script_insertDialogue","args":{"character":"ADA","text":"La porta era aperta."}}',
+    'Richiesta: "La pioggia cade. Ada dice: Chiudi la porta."',
+    'Risposta: {"actions":[{"tool":"script_insertAction","args":{"text":"La pioggia cade."}},{"tool":"script_insertDialogue","args":{"character":"ADA","text":"Chiudi la porta."}}]}',
+    'Se la richiesta contiene un\'azione e una battuta, restituisci entrambe in "actions": script_insertAction per quello che si vede, script_insertDialogue per la battuta.',
+    'Per un\'azione usa script_insertAction. Per una transizione usa script_insertTransition. Non usare una parentetica per un\'azione o una transizione.',
+    'Non aggiungere intestazioni, indentazioni o maiuscole nel testo: le gestisce l\'app.',
     'Non inventare personaggi che non sono nel contesto se non ti viene chiesto.',
     '',
     'Strumenti:',
@@ -106,13 +141,21 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
     return tools.commandForTool.get(name) ?? name;
   }, [tools]);
 
-  const runCalls = useCallback((adapter: ReturnType<typeof createTiptapAdapter>, calls: AiToolCall[]): string[] => {
+  const runCalls = useCallback((adapter: ReturnType<typeof createTiptapAdapter>, calls: AiToolCall[]) => {
     const lines: string[] = [];
+    const failures: string[] = [];
+    let applied = 0;
     for (const call of calls) {
       const result = executeCommand(resolveCommand(call.name), call.args, adapter);
-      lines.push(result.ok ? result.message : `Non ho potuto: ${result.message}`);
+      if (result.ok) {
+        lines.push(result.message);
+        applied++;
+      } else {
+        lines.push(`Non ho potuto: ${result.message}`);
+        failures.push(result.message);
+      }
     }
-    return lines;
+    return { lines, failures, applied };
   }, [resolveCommand]);
 
   const send = useCallback(async (promptArg?: string) => {
@@ -126,12 +169,18 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
     try {
       const adapter = createTiptapAdapter(editor);
       const context = executeCommand('script.getContext', {}, adapter).data;
-      const history = messages
-        .filter((m) => m.role === 'user' || m.role === 'assistant')
-        .slice(-10)
-        .map((m): AiChatMessage => ({ role: m.role, content: m.content }));
+      const openAiCompatible = settings.provider !== 'ollama';
+      // The OpenAI-compatible path sends no history: a small local model tends
+      // to copy an earlier line instead of writing the new one. The prompt and
+      // the context carry everything a command needs.
+      const history = openAiCompatible
+        ? []
+        : messages
+          .filter((m) => m.role === 'user' || m.role === 'assistant')
+          .slice(-10)
+          .map((m): AiChatMessage => ({ role: m.role, content: m.content }));
       const conversation: AiChatMessage[] = [
-        { role: 'system', content: systemPrompt(context) },
+        { role: 'system', content: systemPrompt(context, openAiCompatible) },
         ...history,
         { role: 'user', content: prompt },
       ];
@@ -141,10 +190,23 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
         const reply = await callModel(
           settings,
           conversation,
-          settings.provider === 'ollama' ? tools.tools : [],
+          tools.tools,
         );
+        if (import.meta.env.DEV) console.warn('[ai] reply', reply.content, reply.toolCalls);
 
         if (reply.toolCalls.length > 0) {
+          if (openAiCompatible) {
+            // Unsloth Studio or another OpenAI-compatible server understood the
+            // native tools: those calls already carry their arguments, so run
+            // them and finish (no tool-result turn to keep ids straight).
+            const ran = runCalls(adapter, reply.toolCalls);
+            executed.push(...ran.lines);
+            addMessage('assistant', executed.join(' ') || 'Fatto.');
+            if (ran.failures.length > 0) {
+              setError(`Alcune azioni non sono state eseguite: ${ran.failures.join(' ')}`);
+            }
+            return;
+          }
           // Ollama's native tool flow: the assistant message (with its calls)
           // and one tool result per call go back to the model.
           conversation.push(reply.assistantMessage);
@@ -160,8 +222,64 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
         // ordinary prose.
         const actions = parseJsonActions(reply.content);
         if (actions.length > 0) {
-          executed.push(...runCalls(adapter, actions));
-          addMessage('assistant', executed.join(' ') || 'Fatto.');
+          const ran = runCalls(adapter, actions);
+          if (import.meta.env.DEV) console.warn('[ai] ran', ran);
+          executed.push(...ran.lines);
+          if (ran.applied > 0 || ran.failures.length === 0) {
+            addMessage('assistant', executed.join(' ') || 'Fatto.');
+            if (ran.failures.length > 0) {
+              setError(`Alcune azioni non sono state eseguite: ${ran.failures.join(' ')}`);
+            }
+            return;
+          }
+          // Nothing was applied: give a small model one chance to correct the
+          // parameters it got wrong (a missing `text`, an unknown element).
+          const correction = await callModel(settings, [
+            ...conversation,
+            reply.assistantMessage,
+            {
+              role: 'user',
+              content: `Le azioni non sono valide: ${ran.failures.join(' ')}. Rispondi di nuovo SOLO con JSON valido, usando i parametri dello schema.`,
+            },
+          ], []);
+          const corrected = parseJsonActions(correction.content);
+          if (corrected.length > 0) {
+            const second = runCalls(adapter, corrected);
+            executed.push(...second.lines);
+            addMessage('assistant', executed.join(' ') || 'Fatto.');
+            if (second.failures.length > 0) {
+              setError(`Alcune azioni non sono state eseguite: ${second.failures.join(' ')}`);
+            }
+            return;
+          }
+          setError('Il modello non ha prodotto un\'azione valida. Prova a riformulare la richiesta.');
+          addMessage('assistant', executed.join(' ') || 'Nessuna azione valida.');
+          return;
+        }
+
+        if (openAiCompatible) {
+          // One corrective turn: a small local model sometimes answers with a
+          // confirmation (or prose) instead of the JSON action.
+          const retry = await callModel(settings, [
+            ...conversation,
+            reply.assistantMessage,
+            {
+              role: 'user',
+              content: 'La risposta non conteneva un\'azione JSON. Rispondi di nuovo SOLO con il JSON dell\'azione, senza testo attorno.',
+            },
+          ], []);
+          const retryActions = parseJsonActions(retry.content);
+          if (retryActions.length > 0) {
+            const ran = runCalls(adapter, retryActions);
+            executed.push(...ran.lines);
+            addMessage('assistant', executed.join(' ') || 'Fatto.');
+            if (ran.failures.length > 0) {
+              setError(`Alcune azioni non sono state eseguite: ${ran.failures.join(' ')}`);
+            }
+            return;
+          }
+          setError('Il modello non ha restituito un\'azione JSON. Prova a riformulare o a usare un modello più grande.');
+          addMessage('assistant', clampReply(retry.content || reply.content || 'Nessuna azione ricevuta.'));
           return;
         }
 
@@ -304,8 +422,14 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
           )}
           <p className="ai-hint">
             Ollama: avvia <code>ollama serve</code>. Unsloth Studio espone
-            <code> http://localhost:8080/v1</code>. Se Ollama rifiuta la richiesta per CORS,
-            avvialo con <code>OLLAMA_ORIGINS=*</code>.
+            <code> http://localhost:8080/v1</code> e, se l&apos;autenticazione è attiva, richiede un token:
+            crealo in <strong>API → Token di accesso → Crea token</strong> e incollalo qui sopra.
+            Se Ollama rifiuta la richiesta per CORS, avvialo con <code>OLLAMA_ORIGINS=*</code>.
+          </p>
+          <p className="ai-hint">
+            Per risultati affidabili usa un modello instruct da 7B in su (Qwen2.5-7B-Instruct,
+            Llama 3.1 8B): i modelli da 3B sbagliano spesso a chi attribuire una battuta e a
+            gestire azioni multiple.
           </p>
         </div>
       )}
