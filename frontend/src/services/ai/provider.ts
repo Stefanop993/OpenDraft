@@ -139,7 +139,7 @@ async function callOllama(
     model: settings.model,
     messages,
     stream: false,
-    options: { temperature: 0.3 },
+    options: { temperature: 0.3, num_predict: 1200 },
   };
   if (tools.length > 0) body.tools = tools;
   let response = await fetch(endpoint(settings), {
@@ -185,6 +185,7 @@ async function callOpenAICompatible(
     messages: messages.map(({ role, content }) => ({ role, content })),
     // Low temperature: in this mode the reply is a JSON action, not prose.
     temperature: 0.1,
+    max_tokens: 1200,
     stream: false,
   };
   if (tools.length > 0) {

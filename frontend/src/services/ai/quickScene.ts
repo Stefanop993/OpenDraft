@@ -11,9 +11,36 @@
  * model with the preview.
  */
 
+import { SPEECH_VERBS } from './quickIntent';
+
 export interface QuickScene {
   heading: string;
   action?: string;
+}
+
+export interface QuickScript {
+  blocks: Array<{ type: 'sceneHeading' | 'action' | 'character' | 'dialogue'; text: string }>;
+}
+
+const QUOTE_RE = /«([^»]*)»|“([^”]*)”|"([^"]*)"/g;
+const SPEECH_RE = new RegExp(`\\b(${SPEECH_VERBS.join('|')})\\b`, 'gi');
+
+function firstWord(text: string): string | null {
+  const cleaned = text
+    .replace(/^[\s,.;:!?–—-]+/, '')
+    .replace(/^(?:e|ed|poi|and|then|ora|now)\s+/i, '')
+    .trim();
+  const match = cleaned.match(/^[\p{L}][\p{L}'’ -]*/u);
+  return match ? match[0].split(/\s+/)[0] : null;
+}
+
+/** The action without its subject: "ben rimane impalato" -> "rimane impalato". */
+function withoutSpeaker(text: string, speaker: string): string {
+  const escaped = speaker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return text
+    .replace(new RegExp(`^(?:e|ed|poi|and|then)?\\s*${escaped}\\b`, 'i'), '')
+    .replace(/^(?:e|ed|poi|and|then)\s+/i, '')
+    .trim();
 }
 
 const TIME_WORDS: Record<string, string> = {
@@ -51,7 +78,17 @@ function timeWord(raw: string | undefined): string | null {
   return TIME_WORDS[raw.trim().toLowerCase()] ?? raw.trim().toUpperCase();
 }
 
-/** "fuori"/"esterno"/"outside" -> EXT.; "dentro"/"interno"/"inside" -> INT. */
+/** A rest that contains dialogue belongs to the model, not to a one-line action. */
+const DIALOGUE_MARK = /["«“”]|\b(dice|urla|grida|sussurra|risponde|mormora|dichiara|chiede|says|yells|shouts|whispers|replies|asks)\b/i;
+
+function sceneResult(heading: string, rest: string): QuickScene | null {
+  // If the text after the heading carries a quoted line, the quick path must
+  // not flatten it into one action: the model (and the preview) should split
+  // the beats. Returning null sends the whole prompt there.
+  if (rest && DIALOGUE_MARK.test(rest)) return null;
+  return { heading, action: rest || undefined };
+}
+
 function prefixFor(direction: string): 'INT.' | 'EXT.' {
   return /fuori|esterno|outside|ext/i.test(direction) ? 'EXT.' : 'INT.';
 }
@@ -95,7 +132,7 @@ export function parseQuickScene(prompt: string): QuickScene | null {
     place = place.replace(/^(?:a|in|nel|nella|da|the)\s+/i, '').trim();
     if (!place || place.length > 60) return null;
     const heading = `${prefixFor(direction)} ${place.toUpperCase()}${time ? ` - ${timeWord(time)}` : ''}`;
-    return { heading, action: rest || undefined };
+    return sceneResult(heading, rest);
   }
 
   // "interno casa giorno, <action>" (also INT./EXT. and the English times).
@@ -105,11 +142,73 @@ export function parseQuickScene(prompt: string): QuickScene | null {
     if (!place) return null;
     const time = timeWord(heading[3]);
     const rest = heading[4].trim();
-    return {
-      heading: `${prefixFor(heading[1])} ${place.toUpperCase()}${time ? ` - ${time}` : ''}`,
-      action: rest || undefined,
-    };
+    const headingText = `${prefixFor(heading[1])} ${place.toUpperCase()}${time ? ` - ${time}` : ''}`;
+    return sceneResult(headingText, rest);
   }
 
   return null;
+}
+
+/**
+ * A heading plus a body with quoted lines: split it into scene, actions and
+ * dialogues without the model. The quote is a dialogue; the text before its
+ * speech verb is the action; the first name in that clause is the speaker.
+ * Returns null when the pattern is not clear enough.
+ */
+export function parseSceneWithDialogue(prompt: string): QuickScript | null {
+  const input = prompt.trim();
+  if (!input || input.length > 1200) return null;
+  const heading = input.match(HEADING_IT);
+  if (!heading) return null;
+  const place = heading[2].trim();
+  if (!place) return null;
+  const body = heading[4].trim();
+  if (!body) return null;
+  const quotes = [...body.matchAll(QUOTE_RE)];
+  if (quotes.length === 0) return null;
+
+  const time = timeWord(heading[3]);
+  const blocks: QuickScript['blocks'] = [{
+    type: 'sceneHeading',
+    text: `${prefixFor(heading[1])} ${place.toUpperCase()}${time ? ` - ${time}` : ''}`,
+  }];
+
+  let cursor = 0;
+  for (const quote of quotes) {
+    const start = quote.index ?? 0;
+    const before = body.slice(cursor, start);
+    const quoteText = (quote[1] ?? quote[2] ?? quote[3] ?? '').trim();
+    if (!quoteText) {
+      cursor = start + quote[0].length;
+      continue;
+    }
+
+    const sentences = before.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+    const last = sentences.pop() ?? '';
+    for (const sentence of sentences) blocks.push({ type: 'action', text: sentence });
+
+    let speaker: string | null = null;
+    let actionText = '';
+    const verbs = [...last.matchAll(SPEECH_RE)];
+    const verb = verbs[verbs.length - 1];
+    if (verb) {
+      const lead = last.slice(0, verb.index ?? 0).trim();
+      speaker = firstWord(lead);
+      actionText = lead.replace(/\s+(?:e|ed|e poi|poi|and|then)\s*$/i, '').trim();
+      if (speaker && !withoutSpeaker(actionText, speaker)) actionText = '';
+    } else {
+      const colon = last.match(/([\p{L}][\p{L}'’ -]{0,40}?)\s*:\s*$/u);
+      if (colon) speaker = colon[1].trim();
+    }
+    if (!speaker) return null;
+
+    if (actionText) blocks.push({ type: 'action', text: actionText });
+    blocks.push({ type: 'character', text: speaker.toUpperCase() });
+    blocks.push({ type: 'dialogue', text: quoteText });
+    cursor = start + quote[0].length;
+  }
+
+  const tail = body.slice(cursor).trim().replace(/^[,.;:\s]+/, '');
+  if (tail) blocks.push({ type: 'action', text: tail });
+  return { blocks };
 }

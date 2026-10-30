@@ -154,6 +154,25 @@ describe('the other editorial commands', () => {
     expect(executeCommand('script.insertTransition', { text: 'CUT TO:' }, adapter).ok).toBe(true);
   });
 
+  it('inserts a whole sequence of blocks in one command', () => {
+    const { adapter, calls } = fakeAdapter();
+    const result = executeCommand('script.insertBlocks', {
+      blocks: [
+        { type: 'sceneHeading', text: 'int. house - day' },
+        { type: 'action', text: 'Ada enters.' },
+        { type: 'character', text: 'ada' },
+        { type: 'dialogue', text: 'Hello.' },
+      ],
+    }, adapter);
+    expect(result.ok).toBe(true);
+    expect(calls.blocks[0]).toEqual([
+      { type: 'sceneHeading', text: 'INT. HOUSE - DAY' },
+      { type: 'action', text: 'Ada enters.' },
+      { type: 'character', text: 'ADA' },
+      { type: 'dialogue', text: 'Hello.' },
+    ]);
+  });
+
   it('undoes and redoes', () => {
     const { adapter, calls } = fakeAdapter();
     executeCommand('editor.undo', {}, adapter);

@@ -208,6 +208,61 @@ export function registerScreenplayCommands(): void {
   });
 
   registerCommand({
+    id: 'script.insertBlocks',
+    label: 'Insert blocks',
+    description:
+      'Insert several screenplay blocks in one action: scene heading, action, character, '
+      + 'dialogue, parenthetical, transition, shot, general, new act, end of act or lyrics.',
+    parameters: {
+      type: 'object',
+      properties: {
+        blocks: {
+          type: 'array',
+          description: 'The blocks to insert, in order.',
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string', enum: [...ELEMENTS] },
+              text: { type: 'string' },
+              extension: { type: 'string', description: 'Optional cue extension, e.g. "V.O.".' },
+            },
+            required: ['type', 'text'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['blocks'],
+      additionalProperties: false,
+    },
+    run: ({ adapter }, args) => {
+      const raw = args.blocks;
+      if (!Array.isArray(raw) || raw.length === 0) {
+        return { ok: false, message: 'At least one block is required.' };
+      }
+      if (raw.length > 60) {
+        return { ok: false, message: 'Too many blocks in one insertion (max 60).' };
+      }
+      const blocks: BlockSpec[] = [];
+      for (const item of raw) {
+        const value = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+        const type = elementArg(value, 'type');
+        const text = firstText(value, ['text', 'line']);
+        if (!type || !text) {
+          return { ok: false, message: 'Every block needs a valid type and text.' };
+        }
+        const extension = extensionArg(value);
+        blocks.push({
+          type,
+          text: isUppercaseElement(type) ? text.toUpperCase() : text,
+          ...(type === 'character' && extension ? { extension } : {}),
+        });
+      }
+      adapter.insertBlocks(blocks);
+      return { ok: true, message: `Inserted ${blocks.length} blocks.`, data: { blocks } };
+    },
+  });
+
+  registerCommand({
     id: 'script.insertBlock',
     label: 'Insert element',
     description:

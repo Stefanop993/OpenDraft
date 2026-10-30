@@ -15,7 +15,7 @@ export interface QuickDialogue {
   text: string;
 }
 
-const SPEECH_VERBS = [
+export const SPEECH_VERBS = [
   // Italian, because the writer may type in Italian.
   'dice', 'urla', 'grida', 'sussurra', 'risponde', 'mormora', 'dichiara', 'chiede', 'aggiunge',
   // English.

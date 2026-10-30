@@ -23,7 +23,7 @@ import {
   type PreviewOp, type ScriptContext,
 } from '../commands';
 import { parseQuickDialogue } from '../services/ai/quickIntent';
-import { parseQuickScene } from '../services/ai/quickScene';
+import { parseQuickScene, parseSceneWithDialogue } from '../services/ai/quickScene';
 import {
   callModel,
   listModels,
@@ -83,7 +83,8 @@ function systemPrompt(context: unknown, openAiCompatible: boolean): string {
     .join('\n');
   return [
     'You are the assistant inside OpenDraft, a screenwriting app.',
-    'The writer may write in Italian; understand the request, but answer in English and keep it short.',
+    'The writer may write in Italian; understand the request. Keep your replies short.',
+    'Never translate the screenplay content: names, action and dialogue stay in the language the writer used.',
     'To change the script use the available tools. If you do not receive tools, reply ONLY with a valid JSON object, with no text around it. Never write sentences like "Done" or "Inserted": the app performs the actions.',
     'For a line: {"tool":"script_insertDialogue","args":{"character":"<NAME>","text":"<LINE>"}}',
     'For several actions: {"actions":[{"tool":"...","args":{...}}, ...]}.',
@@ -98,7 +99,7 @@ function systemPrompt(context: unknown, openAiCompatible: boolean): string {
     'Never use script_insertTransition unless the request explicitly asks for a transition (CUT TO, DISSOLVE, FADE...).',
     'When the request describes a whole scene, break it into ALL actions and lines, in order, without summarizing or omitting anything.',
     'If the request starts with inside/outside + place + day/night, the first action is script_insertScene with heading "INT. PLACE - DAY" (or "EXT." for outside).',
-    'A quoted line preceded by says/yells/replies/shouts/whispers is a separate dialogue: script_insertDialogue with the speaking character, not inside an action.',
+    'Any quoted line is dialogue, never part of an action. Attribute it to the character who says it (the subject before says/yells/replies/shouts/whispers) and use script_insertDialogue. Never put quotes inside an action text.',
     'Actions are what we see (enters, undresses, looks): one or more script_insertAction, with the full text, without cutting sentences.',
     'Do not add headings, indentation or capitals to the text: the app handles them.',
     'Do not invent characters that are not in the context unless asked.',
@@ -238,6 +239,18 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
     if (valid.length === 0) {
       return { staged: false, lines: [] as string[], failures, count: 0 };
     }
+    const blockCount = preview.ops.reduce(
+      (count, op) => count + (op.kind === 'blocks' ? op.blocks.length : 1),
+      0,
+    );
+    if (blockCount > 40) {
+      return {
+        staged: false,
+        lines: [] as string[],
+        failures: ['The proposal is too large (max 40 blocks). Try a more specific request.'],
+        count: 0,
+      };
+    }
     if (previewEnabled) {
       setPending({ calls: valid, ops: preview.ops });
       return { staged: true, lines: [] as string[], failures, count: valid.length };
@@ -300,6 +313,21 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
         if (!finishStaged(staged)) {
           setError('I could not prepare the dialogue.');
           addMessage('assistant', 'I could not prepare the dialogue.');
+        }
+        return;
+      }
+
+      // Heading + quoted lines: split the beats here, keeping the writer's
+      // language and the speakers they named.
+      const script = parseSceneWithDialogue(prompt);
+      if (script) {
+        const staged = stageCalls(adapter, [{
+          name: 'script.insertBlocks',
+          args: { blocks: script.blocks },
+        }]);
+        if (!finishStaged(staged)) {
+          setError('I could not prepare the scene.');
+          addMessage('assistant', 'I could not prepare the scene.');
         }
         return;
       }

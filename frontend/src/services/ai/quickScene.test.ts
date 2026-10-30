@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseQuickScene } from './quickScene';
+import { parseQuickScene, parseSceneWithDialogue } from './quickScene';
 
 describe('parseQuickScene', () => {
   it('turns an Italian move outside into a scene heading and action', () => {
@@ -39,7 +39,43 @@ describe('parseQuickScene', () => {
     expect(parseQuickScene('Ben entra in casa e si siede.')).toBeNull();
   });
 
+  it('leaves a heading whose body contains dialogue to the model', () => {
+    expect(parseQuickScene(
+      'interno casa giorno, ben entra arrabbiato. Ben urla "È L\'ORA DELL\'EROE!" e vilgax risponde "GODO PORCODIOOOOO"',
+    )).toBeNull();
+  });
+
   it('ignores very long prompts', () => {
     expect(parseQuickScene('siamo fuori casa, poco dopo. ' + 'x'.repeat(700))).toBeNull();
+  });
+});
+
+describe('parseSceneWithDialogue', () => {
+  it('splits a heading scene with two quoted lines into formatted blocks', () => {
+    const out = parseSceneWithDialogue(
+      'interno casa giorno, ben entra in casa arrabbiato, si spoglia nudo, vede vilgax che entra in casa. ben rimane impalato e urla "È L\'ORA DELL\'EROE!" e vilgax risponde "GODO PORCODIOOOOO"',
+    );
+    expect(out?.blocks).toEqual([
+      { type: 'sceneHeading', text: 'INT. CASA - DAY' },
+      { type: 'action', text: 'ben entra in casa arrabbiato, si spoglia nudo, vede vilgax che entra in casa.' },
+      { type: 'action', text: 'ben rimane impalato' },
+      { type: 'character', text: 'BEN' },
+      { type: 'dialogue', text: "È L'ORA DELL'EROE!" },
+      { type: 'character', text: 'VILGAX' },
+      { type: 'dialogue', text: 'GODO PORCODIOOOOO' },
+    ]);
+  });
+
+  it('reads an explicit heading and a named cue with a colon', () => {
+    const out = parseSceneWithDialogue('INT. HOUSE - NIGHT, ADA: "Get out."');
+    expect(out?.blocks).toEqual([
+      { type: 'sceneHeading', text: 'INT. HOUSE - NIGHT' },
+      { type: 'character', text: 'ADA' },
+      { type: 'dialogue', text: 'Get out.' },
+    ]);
+  });
+
+  it('returns null when a quote has no clear speaker', () => {
+    expect(parseSceneWithDialogue('INT. HOUSE - NIGHT, "Get out."')).toBeNull();
   });
 });
