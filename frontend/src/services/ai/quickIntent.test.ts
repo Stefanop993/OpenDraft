@@ -17,6 +17,15 @@ describe('parseQuickDialogue', () => {
     });
   });
 
+  it('understands English too', () => {
+    expect(parseQuickDialogue('Ben says: "Hello, everyone."')).toEqual({
+      character: 'BEN', text: 'Hello, everyone.',
+    });
+    expect(parseQuickDialogue('Have MARGO say "Get out"')).toEqual({
+      character: 'MARGO', text: 'Get out',
+    });
+  });
+
   it('understands the request wrapped in words', () => {
     expect(parseQuickDialogue('Scrivi un dialogo di Ben che dice «Ciao a tutti»')).toEqual({
       character: 'BEN', text: 'Ciao a tutti',

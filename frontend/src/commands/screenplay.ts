@@ -11,6 +11,7 @@
  * is concerned.
  */
 import { registerCommand } from './registry';
+import { isUppercaseElement } from '../utils/capitals';
 import type { BlockSpec, CommandElement } from './types';
 
 const MAX_TEXT = 20_000;
@@ -71,6 +72,13 @@ function parentheticalArg(args: Record<string, unknown>): string | null {
   const inner = raw.trim().replace(/^\((.*)\)$/, '$1').trim();
   if (!inner) return null;
   return `(${inner.slice(0, MAX_PARENTHETICAL)})`;
+}
+
+const TRANSITION_RE = /^(CUT|DISSOLVE|FADE|SMASH|MATCH|JUMP|WIPE|IRIS|INTERCUT|SPLIT|PUSH|STOCK|TIME CUT)\b/i;
+
+/** A transition ends with a colon or starts with a transition verb. */
+function looksLikeTransition(text: string): boolean {
+  return /:\s*$/.test(text) || TRANSITION_RE.test(text);
 }
 
 const NO_PARAMS = { type: 'object' as const, properties: {}, additionalProperties: false };
@@ -170,6 +178,12 @@ export function registerScreenplayCommands(): void {
     run: ({ adapter }, args) => {
       const text = firstText(args, ['text', 'transition'], 200);
       if (!text) return { ok: false, message: 'The transition text is required.' };
+      if (!looksLikeTransition(text)) {
+        return {
+          ok: false,
+          message: `"${text}" is not a transition. A new place or time is a scene: use script.insertScene.`,
+        };
+      }
       adapter.insertBlocks([{ type: 'transition', text: text.toUpperCase() }]);
       return { ok: true, message: `Inserted the transition ${text.toUpperCase()}.` };
     },
@@ -190,6 +204,32 @@ export function registerScreenplayCommands(): void {
       if (!text) return { ok: false, message: 'The direction text is required.' };
       adapter.insertBlocks([{ type: 'parenthetical', text: `(${text.replace(/^\((.*)\)$/, '$1')})` }]);
       return { ok: true, message: 'Inserted the parenthetical.' };
+    },
+  });
+
+  registerCommand({
+    id: 'script.insertBlock',
+    label: 'Insert element',
+    description:
+      'Insert a block of any screenplay element type, including shot, general, new act, '
+      + 'end of act and lyrics, which have no dedicated insert command.',
+    parameters: {
+      type: 'object',
+      properties: {
+        type: { type: 'string', enum: [...ELEMENTS], description: 'The element type to insert.' },
+        text: { type: 'string', description: 'The text of the block.' },
+      },
+      required: ['type', 'text'],
+      additionalProperties: false,
+    },
+    run: ({ adapter }, args) => {
+      const type = elementArg(args, 'type');
+      const text = firstText(args, ['text', 'line']);
+      if (!type) return { ok: false, message: 'A valid element type is required.' };
+      if (!text) return { ok: false, message: 'The text is required.' };
+      const value = isUppercaseElement(type) ? text.toUpperCase() : text;
+      adapter.insertBlocks([{ type, text: value }]);
+      return { ok: true, message: `Inserted ${type}.`, data: { type, text: value } };
     },
   });
 

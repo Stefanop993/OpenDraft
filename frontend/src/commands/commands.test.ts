@@ -137,6 +137,23 @@ describe('the other editorial commands', () => {
     expect(calls.blocks[2][0]).toEqual({ type: 'sceneHeading', text: 'INT. A - DAY' });
   });
 
+  it('inserts any element type, including the ones without a dedicated command', () => {
+    const { adapter, calls } = fakeAdapter();
+    executeCommand('script.insertBlock', { type: 'shot', text: 'Close on the door.' }, adapter);
+    executeCommand('script.insertBlock', { type: 'newAct', text: 'act two' }, adapter);
+    expect(calls.blocks[0][0]).toEqual({ type: 'shot', text: 'CLOSE ON THE DOOR.' });
+    expect(calls.blocks[1][0]).toEqual({ type: 'newAct', text: 'ACT TWO' });
+  });
+
+  it('refuses a "transition" that is really a scene note', () => {
+    const { adapter, calls } = fakeAdapter();
+    const result = executeCommand('script.insertTransition', { text: 'LATER' }, adapter);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('script.insertScene');
+    expect(calls.blocks).toHaveLength(0);
+    expect(executeCommand('script.insertTransition', { text: 'CUT TO:' }, adapter).ok).toBe(true);
+  });
+
   it('undoes and redoes', () => {
     const { adapter, calls } = fakeAdapter();
     executeCommand('editor.undo', {}, adapter);

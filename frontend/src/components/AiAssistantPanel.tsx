@@ -23,6 +23,7 @@ import {
   type PreviewOp, type ScriptContext,
 } from '../commands';
 import { parseQuickDialogue } from '../services/ai/quickIntent';
+import { parseQuickScene } from '../services/ai/quickScene';
 import {
   callModel,
   listModels,
@@ -42,26 +43,27 @@ interface Props {
 }
 
 const EXAMPLES = [
-  'Scrivi un dialogo di Ben che dice «Ciao a tutti».',
-  'Aggiungi una scena: INT. LAVANDERIA - NOTTE, con un\'azione iniziale.',
-  'Fai dire a MARGO «Non dovevi tornare» con una parentetica «sottovoce».',
+  'Write a line for Ben: "Hello, everyone."',
+  'Add a scene: INT. LAUNDRY - NIGHT, with an opening action.',
+  'Have MARGO say "You shouldn\'t have come back" (whispering).',
 ];
 
 const MAX_STEPS = 6;
 const MAX_REPLY_CHARS = 12_000;
 
 /**
- * A small local model gets confused by eleven similarly named tools. In JSON
- * mode the prompt lists only the six that cover writing: dialogue (which takes
- * the optional parenthetical and extension), action, scene, transition, the
- * element change and replacing the selection. The rest stay available to the
- * command layer and to native-tool providers.
+ * A small local model gets confused by eleven similarly named tools. The
+ * compact list keeps the ones that cover writing: dialogue (with the optional
+ * parenthetical and extension), action, scene, transition, a generic block for
+ * the remaining element types, the element change and replacing the selection.
+ * The rest stay available to the command layer and to native-tool providers.
  */
 const CORE_JSON_TOOLS = new Set([
   'script_insertDialogue',
   'script_insertAction',
   'script_insertScene',
   'script_insertTransition',
+  'script_insertBlock',
   'editor_setElement',
   'editor_replaceSelection',
 ]);
@@ -80,37 +82,41 @@ function systemPrompt(context: unknown, openAiCompatible: boolean): string {
     .map((tool) => `- ${tool.function.name}: ${tool.function.description}`)
     .join('\n');
   return [
-    'Sei l\'assistente di OpenDraft, un\'app di sceneggiatura.',
-    'Rispondi in italiano, in modo breve e concreto.',
-    'Per modificare il copione usa gli strumenti disponibili. Se non li ricevi, rispondi SOLO con un oggetto JSON valido, senza testo attorno. Non scrivere mai frasi come "Fatto" o "Inserted": le azioni le esegue l\'app.',
-    'Per un dialogo: {"tool":"script_insertDialogue","args":{"character":"<NOME>","text":"<BATTUTA>"}}',
-    'Per più azioni: {"actions":[{"tool":"...","args":{...}}, ...]}.',
-    'Usa soltanto i nomi e le battute contenuti nella richiesta: non copiare l\'esempio e non riusare battute di turni precedenti.',
-    'La battuta va al personaggio che la pronuncia nella richiesta, anche se è nuovo: non sostituirlo con un nome del contesto.',
-    'Se la richiesta dice "X dice: ..." o "X: ...", è un dialogo: usa script_insertDialogue con character X, mai un\'azione.',
-    'I nomi scritti nella richiesta valgono anche se non sono ancora nel contesto.',
+    'You are the assistant inside OpenDraft, a screenwriting app.',
+    'The writer may write in Italian; understand the request, but answer in English and keep it short.',
+    'To change the script use the available tools. If you do not receive tools, reply ONLY with a valid JSON object, with no text around it. Never write sentences like "Done" or "Inserted": the app performs the actions.',
+    'For a line: {"tool":"script_insertDialogue","args":{"character":"<NAME>","text":"<LINE>"}}',
+    'For several actions: {"actions":[{"tool":"...","args":{...}}, ...]}.',
+    'Use only names and lines contained in the request; do not copy the examples or reuse lines from previous turns.',
+    'A line belongs to the character who says it in the request, even if new: do not replace it with a name from the context.',
+    'If the request says "X says: ..." or "X: ...", it is dialogue: use script_insertDialogue with character X, never an action.',
+    'Names written in the request are valid even if not yet in the context.',
     '',
-    'Esempi (stessa forma, non copiare i contenuti):',
-    'Richiesta: "Ada dice: La porta era aperta."',
-    'Risposta: {"tool":"script_insertDialogue","args":{"character":"ADA","text":"La porta era aperta."}}',
-    'Richiesta: "La pioggia cade. Ada dice: Chiudi la porta."',
-    'Risposta: {"actions":[{"tool":"script_insertAction","args":{"text":"La pioggia cade."}},{"tool":"script_insertDialogue","args":{"character":"ADA","text":"Chiudi la porta."}}]}',
-    'Richiesta: "interno casa giorno, Ada entra arrabbiata. Vede Bo e urla: «Vattene!» Bo risponde: «No.»"',
-    'Risposta: {"actions":[{"tool":"script_insertScene","args":{"heading":"INT. CASA - GIORNO"}},{"tool":"script_insertAction","args":{"text":"Ada entra arrabbiata."}},{"tool":"script_insertAction","args":{"text":"Vede Bo."}},{"tool":"script_insertDialogue","args":{"character":"ADA","text":"Vattene!"}},{"tool":"script_insertDialogue","args":{"character":"BO","text":"No."}}]}',
-    'Se la richiesta contiene un\'azione e una battuta, restituisci entrambe in "actions": script_insertAction per quello che si vede, script_insertDialogue per la battuta.',
-    'Per un\'azione usa script_insertAction. Per una transizione usa script_insertTransition. Non usare una parentetica per un\'azione o una transizione.',
-    'Quando la richiesta descrive una scena intera, scomponila in TUTTE le azioni e battute, nell\'ordine, senza riassumere e senza omettere nulla.',
-    'Se la richiesta inizia con interno/esterno + luogo + giorno/notte, la prima azione è script_insertScene con heading "INT. LUOGO - GIORNO" (o "EST." per esterno).',
-    'Non aggiungere transizioni (CUT TO:, DISSOLVE TO:) se la richiesta non le nomina.',
-    'Una battuta tra virgolette preceduta da dice/urla/risponde/grida/sussurra è un dialogo separato: script_insertDialogue con il personaggio che parla, non dentro un\'azione.',
-    'Le azioni sono ciò che si vede (entra, si spoglia, guarda): una o più script_insertAction, con il testo completo, senza tagliare frasi.',
-    'Non aggiungere intestazioni, indentazioni o maiuscole nel testo: le gestisce l\'app.',
-    'Non inventare personaggi che non sono nel contesto se non ti viene chiesto.',
+    'Elements: sceneHeading (slugline), action, character (cue), dialogue, parenthetical, transition, shot, general, newAct, endOfAct, lyrics.',
+    'Use the dedicated insert commands for scene, action, dialogue and transition. Use script_insertBlock for shot, general, newAct, endOfAct or lyrics.',
+    'A new place or time is a NEW SCENE: use script_insertScene. "outside/inside", "int./ext.", "later", "day/night" are a scene heading, not a transition.',
+    'Never use script_insertTransition unless the request explicitly asks for a transition (CUT TO, DISSOLVE, FADE...).',
+    'When the request describes a whole scene, break it into ALL actions and lines, in order, without summarizing or omitting anything.',
+    'If the request starts with inside/outside + place + day/night, the first action is script_insertScene with heading "INT. PLACE - DAY" (or "EXT." for outside).',
+    'A quoted line preceded by says/yells/replies/shouts/whispers is a separate dialogue: script_insertDialogue with the speaking character, not inside an action.',
+    'Actions are what we see (enters, undresses, looks): one or more script_insertAction, with the full text, without cutting sentences.',
+    'Do not add headings, indentation or capitals to the text: the app handles them.',
+    'Do not invent characters that are not in the context unless asked.',
     '',
-    'Strumenti:',
+    'Examples (same shape, do not copy the content):',
+    'Request: "Ada says: The door was open."',
+    'Reply: {"tool":"script_insertDialogue","args":{"character":"ADA","text":"The door was open."}}',
+    'Request: "Rain falls. Ada says: Close the door."',
+    'Reply: {"actions":[{"tool":"script_insertAction","args":{"text":"Rain falls."}},{"tool":"script_insertDialogue","args":{"character":"ADA","text":"Close the door."}}]}',
+    'Request: "INT. HOUSE - DAY, Ada enters angry. She sees Bo and yells: «Get out!» Bo replies: «No.»"',
+    'Reply: {"actions":[{"tool":"script_insertScene","args":{"heading":"INT. HOUSE - DAY"}},{"tool":"script_insertAction","args":{"text":"Ada enters angry."}},{"tool":"script_insertAction","args":{"text":"She sees Bo."}},{"tool":"script_insertDialogue","args":{"character":"ADA","text":"Get out!"}},{"tool":"script_insertDialogue","args":{"character":"BO","text":"No."}}]}',
+    'Request: "We are outside the house, a little later. Vilgax waits by the door."',
+    'Reply: {"actions":[{"tool":"script_insertScene","args":{"heading":"EXT. HOUSE - LATER"}},{"tool":"script_insertAction","args":{"text":"Vilgax waits by the door."}}]}',
+    '',
+    'Tools:',
     tools,
     '',
-    'Contesto attuale:',
+    'Current context:',
     JSON.stringify(context ?? {}),
   ].join('\n');
 }
@@ -137,14 +143,14 @@ const PreviewOpView: React.FC<{ op: PreviewOp }> = ({ op }) => {
   if (op.kind === 'element') {
     return (
       <div className="ai-preview-note">
-        Elemento → {ELEMENT_LABELS[op.type] ?? op.type}
+        Element → {ELEMENT_LABELS[op.type] ?? op.type}
       </div>
     );
   }
   if (op.kind === 'replace') {
     return (
       <div className="ai-preview-block ai-preview-replace">
-        Sostituisci con: {op.text}
+        Replace with: {op.text}
         {op.element ? ` (${ELEMENT_LABELS[op.element] ?? op.element})` : ''}
       </div>
     );
@@ -200,7 +206,7 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
         lines.push(result.message);
         applied++;
       } else {
-        lines.push(`Non ho potuto: ${result.message}`);
+        lines.push(`Could not: ${result.message}`);
         failures.push(result.message);
       }
     }
@@ -252,13 +258,13 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
     setPending(null);
     addMessage('assistant', ran.lines.join(' ') || 'Fatto.');
     if (ran.failures.length > 0) {
-      setError(`Alcune azioni non sono state eseguite: ${ran.failures.join(' ')}`);
+      setError(`Some actions were not applied: ${ran.failures.join(' ')}`);
     }
   }, [pending, editor, runCalls, addMessage, setError]);
 
   const rejectPending = useCallback(() => {
     setPending(null);
-    addMessage('assistant', 'Proposta annullata.');
+    addMessage('assistant', 'Proposal discarded.');
   }, [addMessage]);
 
   const send = useCallback(async (promptArg?: string) => {
@@ -276,10 +282,10 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
 
       const finishStaged = (staged: ReturnType<typeof stageCalls>): boolean => {
         if (staged.count === 0) return false;
-        if (staged.staged) addMessage('assistant', 'Proposta pronta: controlla e conferma.');
+        if (staged.staged) addMessage('assistant', 'Proposal ready - review and confirm.');
         else addMessage('assistant', staged.lines.join(' ') || 'Fatto.');
         if (staged.failures.length > 0) {
-          setError(`Alcune azioni non sono state eseguite: ${staged.failures.join(' ')}`);
+          setError(`Some actions were not applied: ${staged.failures.join(' ')}`);
         }
         return true;
       };
@@ -292,8 +298,26 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
           args: { character: quick.character, text: quick.text },
         }]);
         if (!finishStaged(staged)) {
-          setError('Non ho potuto preparare il dialogo.');
-          addMessage('assistant', 'Non ho potuto preparare il dialogo.');
+          setError('I could not prepare the dialogue.');
+          addMessage('assistant', 'I could not prepare the dialogue.');
+        }
+        return;
+      }
+
+      // A new place or time is a scene, never a transition. The model kept
+      // turning "ora siamo fuori casa, poco dopo" into CUT TO.
+      const scene = parseQuickScene(prompt);
+      if (scene) {
+        const staged = stageCalls(adapter, [{
+          name: 'script.insertScene',
+          args: {
+            heading: scene.heading,
+            ...(scene.action ? { action: scene.action } : {}),
+          },
+        }]);
+        if (!finishStaged(staged)) {
+          setError('I could not prepare the scene.');
+          addMessage('assistant', 'I could not prepare the scene.');
         }
         return;
       }
@@ -329,8 +353,19 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
             // native tools: those calls already carry their arguments. Show
             // them as a proposal (or run them, when preview is off).
             if (finishStaged(stageCalls(adapter, reply.toolCalls))) return;
-            setError(`Nessuna azione valida: ${reply.toolCalls.map((c) => c.name).join(', ')}`);
-            addMessage('assistant', 'Nessuna azione valida.');
+            // One correction: a small model sometimes names a transition where
+            // the request described a new scene.
+            const correction = await callModel(settings, [
+              ...conversation,
+              reply.assistantMessage,
+              {
+                role: 'user',
+                content: 'The previous tool calls were invalid. A new place or time is script_insertScene; use script_insertTransition only for CUT TO, DISSOLVE or FADE. Reply with corrected tool calls.',
+              },
+            ], tools.tools);
+            if (correction.toolCalls.length > 0 && finishStaged(stageCalls(adapter, correction.toolCalls))) return;
+            setError(`No valid actions: ${reply.toolCalls.map((c) => c.name).join(', ')}`);
+            addMessage('assistant', 'No valid actions.');
             return;
           }
           if (previewEnabled) {
@@ -342,7 +377,7 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
           for (const call of reply.toolCalls) {
             const result = executeCommand(resolveCommand(call.name), call.args, adapter);
             conversation.push(toolResultMessage(call.name, result));
-            executed.push(result.ok ? result.message : `Non ho potuto: ${result.message}`);
+            executed.push(result.ok ? result.message : `Could not: ${result.message}`);
           }
           continue;
         }
@@ -364,8 +399,8 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
           ], []);
           const corrected = parseJsonActions(correction.content);
           if (corrected.length > 0 && finishStaged(stageCalls(adapter, corrected))) return;
-          setError('Il modello non ha prodotto un\'azione valida. Prova a riformulare la richiesta.');
-          addMessage('assistant', 'Nessuna azione valida.');
+          setError('The model did not produce a valid action. Try rephrasing the request.');
+          addMessage('assistant', 'No valid actions.');
           return;
         }
 
@@ -377,13 +412,13 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
             reply.assistantMessage,
             {
               role: 'user',
-              content: 'La risposta non conteneva un\'azione JSON. Rispondi di nuovo SOLO con il JSON dell\'azione, senza testo attorno.',
+              content: 'The previous reply contained no JSON action. Reply again with ONLY the action JSON, with no text around it.',
             },
           ], []);
           const retryActions = parseJsonActions(retry.content);
           if (retryActions.length > 0 && finishStaged(stageCalls(adapter, retryActions))) return;
-          setError('Il modello non ha restituito un\'azione JSON. Prova a riformulare o a usare un modello più grande.');
-          addMessage('assistant', clampReply(retry.content || reply.content || 'Nessuna azione ricevuta.'));
+          setError('The model did not return a JSON action. Try rephrasing or use a larger model.');
+          addMessage('assistant', clampReply(retry.content || reply.content || 'No action received.'));
           return;
         }
 
@@ -414,7 +449,7 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
       if (found.length > 0 && !found.includes(settings.model)) {
         updateSettings({ model: found[0] });
       }
-      if (found.length === 0) setError('Nessun modello trovato: carica un modello nel server e riprova.');
+      if (found.length === 0) setError('No models found: load a model in the server and try again.');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -429,6 +464,13 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
 
   if (!panelOpen) return null;
 
+  const previewBlockCount = pending
+    ? pending.ops.reduce(
+      (count, op) => count + (op.kind === 'blocks' ? op.blocks.length : 1),
+      0,
+    )
+    : 0;
+
   return (
     <div className="ai-panel" style={style}>
       <div className="ai-header">
@@ -436,20 +478,20 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
         <div className="ai-header-actions">
           <button
             className={`ai-icon-btn${settingsOpen ? ' active' : ''}`}
-            title="Impostazioni del modello"
+            title="Model settings"
             onClick={() => setSettingsOpen((v) => !v)}
           >
             <FaCog />
           </button>
           <button
             className="ai-icon-btn"
-            title="Nuova conversazione"
+            title="New conversation"
             onClick={clearMessages}
             disabled={messages.length === 0 || busy}
           >
             <FaTrashAlt />
           </button>
-          <button className="ai-icon-btn" title="Chiudi" onClick={() => setPanelOpen(false)}>
+          <button className="ai-icon-btn" title="Close" onClick={() => setPanelOpen(false)}>
             <FaTimes />
           </button>
         </div>
@@ -490,7 +532,7 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
             />
           </label>
           <label className="ai-field">
-            <span>Modello</span>
+            <span>Model</span>
             <div className="ai-model-row">
               <input
                 className="ai-input"
@@ -504,7 +546,7 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
               </datalist>
               <button
                 className="ai-icon-btn"
-                title="Leggi i modelli dal server"
+                title="Read models from the server"
                 onClick={refreshModels}
                 disabled={refreshing}
               >
@@ -514,13 +556,13 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
           </label>
           {settings.provider === 'openai' && (
             <label className="ai-field">
-              <span>API key (solo se il server la richiede)</span>
+              <span>API key (only if the server requires one)</span>
               <input
                 className="ai-input"
                 type="password"
                 value={settings.apiKey}
                 onChange={(e) => updateSettings({ apiKey: e.target.value })}
-                placeholder="opzionale"
+                placeholder="optional"
               />
             </label>
           )}
@@ -530,18 +572,18 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
               checked={previewEnabled}
               onChange={(e) => setPreviewEnabled(e.target.checked)}
             />
-            <span>Mostra un&apos;anteprima prima di inserire</span>
+            <span>Show a preview before inserting</span>
           </label>
           <p className="ai-hint">
-            Ollama: avvia <code>ollama serve</code>. Unsloth Studio espone
-            <code> http://localhost:8080/v1</code> e, se l&apos;autenticazione è attiva, richiede un token:
-            crealo in <strong>API → Token di accesso → Crea token</strong> e incollalo qui sopra.
-            Se Ollama rifiuta la richiesta per CORS, avvialo con <code>OLLAMA_ORIGINS=*</code>.
+            Ollama: run <code>ollama serve</code>. Unsloth Studio exposes
+            <code> http://localhost:8080/v1</code> and, when authentication is on, requires a token:
+            create it in <strong>API → Access tokens → Create token</strong> and paste it above.
+            If Ollama refuses the request for CORS, start it with <code>OLLAMA_ORIGINS=*</code>.
           </p>
           <p className="ai-hint">
-            Per risultati affidabili usa un modello instruct da 7B in su (Qwen2.5-7B-Instruct,
-            Llama 3.1 8B): i modelli da 3B sbagliano spesso a chi attribuire una battuta e a
-            gestire azioni multiple.
+            For reliable results use an instruct model of 7B or more (Qwen2.5-7B-Instruct,
+            Llama 3.1 8B): 3B models often misattribute a line and mishandle
+            multiple actions.
           </p>
         </div>
       )}
@@ -549,8 +591,8 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
       <div className="ai-messages" ref={listRef}>
         {messages.length === 0 && (
           <div className="ai-empty">
-            <p>Chiedi di scrivere nel copione. L&apos;assistente usa i comandi dell&apos;app,
-               quindi il testo arriva già formattato.</p>
+            <p>Ask the assistant to write into the script. It uses the app&apos;s commands,
+               so the text arrives already formatted.</p>
             {EXAMPLES.map((example) => (
               <button key={example} className="ai-example" onClick={() => void send(example)}>
                 {example}
@@ -560,14 +602,14 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
         )}
         {messages.map((message) => (
           <div key={message.id} className={`ai-message ai-${message.role}`}>
-            <div className="ai-message-role">{message.role === 'user' ? 'Tu' : 'Assistente'}</div>
+            <div className="ai-message-role">{message.role === 'user' ? 'You' : 'Assistant'}</div>
             <div className="ai-message-text">{message.content}</div>
           </div>
         ))}
         {busy && (
           <div className="ai-message ai-assistant">
-            <div className="ai-message-role">Assistente</div>
-            <div className="ai-message-text ai-thinking">Sto scrivendo…</div>
+            <div className="ai-message-role">Assistant</div>
+            <div className="ai-message-text ai-thinking">Writing…</div>
           </div>
         )}
       </div>
@@ -575,17 +617,17 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
       {pending && (
         <div className="ai-preview">
           <div className="ai-preview-header">
-            <span>Proposta</span>
+            <span>Proposal</span>
             <span className="ai-preview-count">
-              {pending.ops.length} {pending.ops.length === 1 ? 'blocco' : 'blocchi'}
+              {previewBlockCount} {previewBlockCount === 1 ? 'block' : 'blocks'}
             </span>
           </div>
           <div className="ai-preview-body">
             {pending.ops.map((op, i) => <PreviewOpView key={i} op={op} />)}
           </div>
           <div className="ai-preview-actions">
-            <button className="ai-preview-accept" onClick={acceptPending}>Inserisci</button>
-            <button className="ai-preview-reject" onClick={rejectPending}>Annulla</button>
+            <button className="ai-preview-accept" onClick={acceptPending}>Insert</button>
+            <button className="ai-preview-reject" onClick={rejectPending}>Discard</button>
           </div>
         </div>
       )}
@@ -598,7 +640,7 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
           className="ai-input ai-textarea"
           rows={3}
           value={input}
-          placeholder="Es. Scrivi un dialogo di Ben che dice «Ciao a tutti»"
+          placeholder="e.g. Write a line for Ben: &quot;Hello, everyone.&quot;"
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -610,14 +652,14 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
         />
         <button
           className="ai-send"
-          title="Invia (Invio)"
+          title="Send (Enter)"
           onClick={() => void send()}
           disabled={busy || !input.trim() || !editor}
         >
           <FaPaperPlane />
         </button>
       </div>
-      {!editor && <div className="ai-error">Apri un copione per usare l&apos;assistente.</div>}
+      {!editor && <div className="ai-error">Open a screenplay to use the assistant.</div>}
     </div>
   );
 };

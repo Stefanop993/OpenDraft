@@ -67,11 +67,11 @@ function describeNetworkError(settings: AiSettings, err: unknown): string {
   const base = normalizeBaseUrl(settings.baseUrl);
   const message = err instanceof Error ? err.message : String(err);
   if (/failed to fetch|networkerror|load failed/i.test(message)) {
-    return `Impossibile raggiungere ${base}. Controlla che il server sia acceso e che l'origine `
-      + `dell'app sia consentita (per Ollama: OLLAMA_ORIGINS=*; per Unsloth Studio: il server deve `
-      + `essere in ascolto su ${base}).`;
+    return `Could not reach ${base}. Check that the server is running and that the app's origin `
+      + `is allowed (for Ollama: OLLAMA_ORIGINS=*; for Unsloth Studio: the server must be `
+      + `listening on ${base}).`;
   }
-  return `Errore dal modello: ${message}`;
+  return `Model error: ${message}`;
 }
 
 async function readError(response: Response): Promise<string> {
@@ -88,8 +88,8 @@ async function readError(response: Response): Promise<string> {
 async function httpError(response: Response): Promise<Error> {
   if (response.status === 401 || response.status === 403) {
     return new Error(
-      'Il server richiede una API key. Copiala da Unsloth Studio (o dal tuo server) e '
-      + 'incollala nel campo "API key" nelle impostazioni dell\'assistente.',
+      'The server requires an API key. Copy it from Unsloth Studio (or your server) and '
+      + 'paste it into the "API key" field in the assistant settings.',
     );
   }
   return new Error(await readError(response));
@@ -229,8 +229,8 @@ export async function callModel(
   messages: AiChatMessage[],
   tools: ToolDefinition[] = [],
 ): Promise<AiReply> {
-  if (!normalizeBaseUrl(settings.baseUrl)) throw new Error('Configura l\'URL del server locale.');
-  if (!settings.model.trim()) throw new Error('Configura il nome del modello.');
+  if (!normalizeBaseUrl(settings.baseUrl)) throw new Error('Configure the local server URL.');
+  if (!settings.model.trim()) throw new Error('Configure the model name.');
   try {
     return settings.provider === 'ollama'
       ? await callOllama(settings, messages, tools)

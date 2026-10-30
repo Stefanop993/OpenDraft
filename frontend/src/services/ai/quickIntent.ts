@@ -16,7 +16,10 @@ export interface QuickDialogue {
 }
 
 const SPEECH_VERBS = [
+  // Italian, because the writer may type in Italian.
   'dice', 'urla', 'grida', 'sussurra', 'risponde', 'mormora', 'dichiara', 'chiede', 'aggiunge',
+  // English.
+  'says', 'say', 'yells', 'shouts', 'whispers', 'replies', 'asks', 'adds', 'screams',
 ];
 
 /** Words that are never a character name at the end of the lead-in. */
@@ -24,6 +27,8 @@ const STOPWORDS = new Set([
   'che', 'di', 'a', 'da', 'il', 'lo', 'la', 'i', 'gli', 'le', 'un', 'uno', 'una',
   'e', 'ed', 'poi', 'ora', 'adesso', 'quindi', 'fai', 'scrivi', 'dialogo', 'frase',
   'battuta', 'una', 'un', 'del', 'della', 'dei', 'delle',
+  'the', 'a', 'an', 'and', 'then', 'now', 'later', 'please', 'write', 'dialogue',
+  'line', 'have', 'for', 'to', 'of', 'with',
 ]);
 
 const VERB_RE = new RegExp(`\\b(${SPEECH_VERBS.join('|')})\\b`, 'gi');
