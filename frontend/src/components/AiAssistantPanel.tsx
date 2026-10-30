@@ -17,7 +17,11 @@ import {
   FaRobot, FaPaperPlane, FaCog, FaTrashAlt, FaSyncAlt, FaTimes,
 } from 'react-icons/fa';
 import { useAiStore, AI_PROVIDER_LABELS } from '../stores/aiStore';
-import { commandTools, createTiptapAdapter, executeCommand } from '../commands';
+import { ELEMENT_LABELS } from '../stores/editorStore';
+import {
+  commandTools, createPreviewAdapter, createTiptapAdapter, executeCommand, getCommand,
+  type PreviewOp, type ScriptContext,
+} from '../commands';
 import {
   callModel,
   listModels,
@@ -114,6 +118,39 @@ function clampReply(text: string): string {
   return text.length > MAX_REPLY_CHARS ? `${text.slice(0, MAX_REPLY_CHARS)}…` : text;
 }
 
+/** One step of a proposal, drawn the way it will land on the page. */
+const PreviewOpView: React.FC<{ op: PreviewOp }> = ({ op }) => {
+  if (op.kind === 'blocks') {
+    return (
+      <>
+        {op.blocks.map((block, i) => (
+          <div key={i} className={`ai-preview-block ai-preview-${block.type}`}>
+            {block.type === 'character' && block.extension
+              ? `${block.text} ${block.extension}`
+              : block.text}
+          </div>
+        ))}
+      </>
+    );
+  }
+  if (op.kind === 'element') {
+    return (
+      <div className="ai-preview-note">
+        Elemento → {ELEMENT_LABELS[op.type] ?? op.type}
+      </div>
+    );
+  }
+  if (op.kind === 'replace') {
+    return (
+      <div className="ai-preview-block ai-preview-replace">
+        Sostituisci con: {op.text}
+        {op.element ? ` (${ELEMENT_LABELS[op.element] ?? op.element})` : ''}
+      </div>
+    );
+  }
+  return <div className="ai-preview-block ai-preview-text">{op.text}</div>;
+};
+
 const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
   const panelOpen = useAiStore((s) => s.panelOpen);
   const setPanelOpen = useAiStore((s) => s.setPanelOpen);
@@ -126,11 +163,15 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
   const setBusy = useAiStore((s) => s.setBusy);
   const error = useAiStore((s) => s.error);
   const setError = useAiStore((s) => s.setError);
+  const previewEnabled = useAiStore((s) => s.previewEnabled);
+  const setPreviewEnabled = useAiStore((s) => s.setPreviewEnabled);
 
   const [input, setInput] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  /** The model's proposal, waiting for Accept. Nothing has touched the script. */
+  const [pending, setPending] = useState<{ calls: AiToolCall[]; ops: PreviewOp[] } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -165,17 +206,83 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
     return { lines, failures, applied };
   }, [resolveCommand]);
 
+  /**
+   * Run the calls against a dry-run adapter first. Valid ones become a
+   * proposal the writer accepts; nothing reaches the script until then.
+   */
+  const stageCalls = useCallback((
+    adapter: ReturnType<typeof createTiptapAdapter>,
+    calls: AiToolCall[],
+  ) => {
+    const preview = createPreviewAdapter(adapter.context());
+    const valid: AiToolCall[] = [];
+    const failures: string[] = [];
+    for (const call of calls) {
+      const id = resolveCommand(call.name);
+      if (getCommand(id)?.readOnly) continue;
+      const before = preview.ops.length;
+      const result = executeCommand(id, call.args, preview.adapter);
+      if (result.ok) valid.push(call);
+      else {
+        failures.push(result.message);
+        preview.ops.splice(before);
+      }
+    }
+    if (valid.length === 0) {
+      return { staged: false, lines: [] as string[], failures, count: 0 };
+    }
+    if (previewEnabled) {
+      setPending({ calls: valid, ops: preview.ops });
+      return { staged: true, lines: [] as string[], failures, count: valid.length };
+    }
+    const ran = runCalls(adapter, valid);
+    return {
+      staged: false,
+      lines: ran.lines,
+      failures: [...failures, ...ran.failures],
+      count: valid.length,
+    };
+  }, [resolveCommand, previewEnabled, runCalls]);
+
+  const acceptPending = useCallback(() => {
+    if (!pending || !editor) return;
+    const adapter = createTiptapAdapter(editor);
+    const ran = runCalls(adapter, pending.calls);
+    setPending(null);
+    addMessage('assistant', ran.lines.join(' ') || 'Fatto.');
+    if (ran.failures.length > 0) {
+      setError(`Alcune azioni non sono state eseguite: ${ran.failures.join(' ')}`);
+    }
+  }, [pending, editor, runCalls, addMessage, setError]);
+
+  const rejectPending = useCallback(() => {
+    setPending(null);
+    addMessage('assistant', 'Proposta annullata.');
+  }, [addMessage]);
+
   const send = useCallback(async (promptArg?: string) => {
     const prompt = (promptArg ?? input).trim();
     if (!prompt || busy || !editor || editor.isDestroyed) return;
     setInput('');
     setError(null);
+    setPending(null);
     addMessage('user', prompt);
     setBusy(true);
 
     try {
       const adapter = createTiptapAdapter(editor);
-      const context = executeCommand('script.getContext', {}, adapter).data;
+      const context = executeCommand('script.getContext', {}, adapter).data as ScriptContext | undefined;
+
+      const finishStaged = (staged: ReturnType<typeof stageCalls>): boolean => {
+        if (staged.count === 0) return false;
+        if (staged.staged) addMessage('assistant', 'Proposta pronta: controlla e conferma.');
+        else addMessage('assistant', staged.lines.join(' ') || 'Fatto.');
+        if (staged.failures.length > 0) {
+          setError(`Alcune azioni non sono state eseguite: ${staged.failures.join(' ')}`);
+        }
+        return true;
+      };
+
       const openAiCompatible = settings.provider !== 'ollama';
       // The OpenAI-compatible path sends no history: a small local model tends
       // to copy an earlier line instead of writing the new one. The prompt and
@@ -204,15 +311,15 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
         if (reply.toolCalls.length > 0) {
           if (openAiCompatible) {
             // Unsloth Studio or another OpenAI-compatible server understood the
-            // native tools: those calls already carry their arguments, so run
-            // them and finish (no tool-result turn to keep ids straight).
-            const ran = runCalls(adapter, reply.toolCalls);
-            executed.push(...ran.lines);
-            addMessage('assistant', executed.join(' ') || 'Fatto.');
-            if (ran.failures.length > 0) {
-              setError(`Alcune azioni non sono state eseguite: ${ran.failures.join(' ')}`);
-            }
+            // native tools: those calls already carry their arguments. Show
+            // them as a proposal (or run them, when preview is off).
+            if (finishStaged(stageCalls(adapter, reply.toolCalls))) return;
+            setError(`Nessuna azione valida: ${reply.toolCalls.map((c) => c.name).join(', ')}`);
+            addMessage('assistant', 'Nessuna azione valida.');
             return;
+          }
+          if (previewEnabled) {
+            if (finishStaged(stageCalls(adapter, reply.toolCalls))) return;
           }
           // Ollama's native tool flow: the assistant message (with its calls)
           // and one tool result per call go back to the model.
@@ -229,38 +336,21 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
         // ordinary prose.
         const actions = parseJsonActions(reply.content);
         if (actions.length > 0) {
-          const ran = runCalls(adapter, actions);
-          if (import.meta.env.DEV) console.warn('[ai] ran', ran);
-          executed.push(...ran.lines);
-          if (ran.applied > 0 || ran.failures.length === 0) {
-            addMessage('assistant', executed.join(' ') || 'Fatto.');
-            if (ran.failures.length > 0) {
-              setError(`Alcune azioni non sono state eseguite: ${ran.failures.join(' ')}`);
-            }
-            return;
-          }
-          // Nothing was applied: give a small model one chance to correct the
+          if (finishStaged(stageCalls(adapter, actions))) return;
+          // Nothing valid: give a small model one chance to correct the
           // parameters it got wrong (a missing `text`, an unknown element).
           const correction = await callModel(settings, [
             ...conversation,
             reply.assistantMessage,
             {
               role: 'user',
-              content: `Le azioni non sono valide: ${ran.failures.join(' ')}. Rispondi di nuovo SOLO con JSON valido, usando i parametri dello schema.`,
+              content: 'Le azioni non sono valide: mancano o sono errati dei parametri. Rispondi di nuovo SOLO con JSON valido, usando i parametri dello schema.',
             },
           ], []);
           const corrected = parseJsonActions(correction.content);
-          if (corrected.length > 0) {
-            const second = runCalls(adapter, corrected);
-            executed.push(...second.lines);
-            addMessage('assistant', executed.join(' ') || 'Fatto.');
-            if (second.failures.length > 0) {
-              setError(`Alcune azioni non sono state eseguite: ${second.failures.join(' ')}`);
-            }
-            return;
-          }
+          if (corrected.length > 0 && finishStaged(stageCalls(adapter, corrected))) return;
           setError('Il modello non ha prodotto un\'azione valida. Prova a riformulare la richiesta.');
-          addMessage('assistant', executed.join(' ') || 'Nessuna azione valida.');
+          addMessage('assistant', 'Nessuna azione valida.');
           return;
         }
 
@@ -276,15 +366,7 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
             },
           ], []);
           const retryActions = parseJsonActions(retry.content);
-          if (retryActions.length > 0) {
-            const ran = runCalls(adapter, retryActions);
-            executed.push(...ran.lines);
-            addMessage('assistant', executed.join(' ') || 'Fatto.');
-            if (ran.failures.length > 0) {
-              setError(`Alcune azioni non sono state eseguite: ${ran.failures.join(' ')}`);
-            }
-            return;
-          }
+          if (retryActions.length > 0 && finishStaged(stageCalls(adapter, retryActions))) return;
           setError('Il modello non ha restituito un\'azione JSON. Prova a riformulare o a usare un modello più grande.');
           addMessage('assistant', clampReply(retry.content || reply.content || 'Nessuna azione ricevuta.'));
           return;
@@ -305,7 +387,7 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
     }
   }, [
     input, busy, editor, messages, settings, tools, addMessage, setBusy, setError,
-    resolveCommand, runCalls,
+    resolveCommand, runCalls, stageCalls, previewEnabled,
   ]);
 
   const refreshModels = useCallback(async () => {
@@ -427,6 +509,14 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
               />
             </label>
           )}
+          <label className="ai-check">
+            <input
+              type="checkbox"
+              checked={previewEnabled}
+              onChange={(e) => setPreviewEnabled(e.target.checked)}
+            />
+            <span>Mostra un&apos;anteprima prima di inserire</span>
+          </label>
           <p className="ai-hint">
             Ollama: avvia <code>ollama serve</code>. Unsloth Studio espone
             <code> http://localhost:8080/v1</code> e, se l&apos;autenticazione è attiva, richiede un token:
@@ -466,6 +556,24 @@ const AiAssistantPanel: React.FC<Props> = ({ editor, style }) => {
           </div>
         )}
       </div>
+
+      {pending && (
+        <div className="ai-preview">
+          <div className="ai-preview-header">
+            <span>Proposta</span>
+            <span className="ai-preview-count">
+              {pending.ops.length} {pending.ops.length === 1 ? 'blocco' : 'blocchi'}
+            </span>
+          </div>
+          <div className="ai-preview-body">
+            {pending.ops.map((op, i) => <PreviewOpView key={i} op={op} />)}
+          </div>
+          <div className="ai-preview-actions">
+            <button className="ai-preview-accept" onClick={acceptPending}>Inserisci</button>
+            <button className="ai-preview-reject" onClick={rejectPending}>Annulla</button>
+          </div>
+        </div>
+      )}
 
       {error && !settingsOpen && <div className="ai-error">{error}</div>}
 

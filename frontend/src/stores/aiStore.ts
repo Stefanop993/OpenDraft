@@ -14,6 +14,7 @@ import {
 } from '../services/ai/provider';
 
 const SETTINGS_KEY = 'opendraft:ai';
+const PREVIEW_KEY = 'opendraft:aiPreview';
 const MAX_MESSAGES = 200;
 
 export interface AiUiMessage {
@@ -29,9 +30,12 @@ interface AiState {
   messages: AiUiMessage[];
   busy: boolean;
   error: string | null;
+  /** Show what the model proposes before touching the script. */
+  previewEnabled: boolean;
   togglePanel: () => void;
   setPanelOpen: (open: boolean) => void;
   updateSettings: (patch: Partial<AiSettings>) => void;
+  setPreviewEnabled: (enabled: boolean) => void;
   addMessage: (role: AiUiMessage['role'], content: string) => void;
   clearMessages: () => void;
   setBusy: (busy: boolean) => void;
@@ -86,6 +90,13 @@ export const useAiStore = create<AiState>((set, get) => ({
   messages: [],
   busy: false,
   error: null,
+  previewEnabled: (() => {
+    try {
+      return localStorage.getItem(PREVIEW_KEY) !== '0';
+    } catch {
+      return true;
+    }
+  })(),
 
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
   setPanelOpen: (open) => set({ panelOpen: open }),
@@ -94,6 +105,15 @@ export const useAiStore = create<AiState>((set, get) => ({
     const settings: AiSettings = { ...get().settings, ...patch };
     saveSettings(settings);
     set({ settings });
+  },
+
+  setPreviewEnabled: (enabled) => {
+    try {
+      localStorage.setItem(PREVIEW_KEY, enabled ? '1' : '0');
+    } catch {
+      // The choice still lasts for this session.
+    }
+    set({ previewEnabled: enabled });
   },
 
   addMessage: (role, content) => set((s) => ({

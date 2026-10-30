@@ -287,6 +287,7 @@ export function registerScreenplayCommands(): void {
     description:
       'Read the current scene, element, selection, characters and scene list. '
       + 'Use it when you need to know where in the script you are before writing.',
+    readOnly: true,
     parameters: NO_PARAMS,
     run: ({ adapter }) => {
       const context = adapter.context();

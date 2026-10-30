@@ -87,6 +87,8 @@ export interface CommandSpec {
   /** One sentence explaining when to use it, read by models too. */
   description: string;
   parameters: CommandParameterSchema;
+  /** True when the command only reads: it never needs an insertion preview. */
+  readOnly?: boolean;
   run: (context: CommandRunContext, args: Record<string, unknown>) => CommandResult;
 }
 
