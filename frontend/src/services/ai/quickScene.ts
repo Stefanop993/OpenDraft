@@ -106,6 +106,8 @@ function splitFirstSentence(text: string): { clause: string; rest: string } {
 const MOVE_IT = /^(?:ora\s+)?(?:siamo|ci\s+troviamo|andiamo)\s+(fuori|dentro|all['’]?esterno|all['’]?interno)\s+(?:a\s+|in\s+|nel\s+|nella\s+|da\s+)?([\s\S]+)$/iu;
 const MOVE_EN = /^(?:now\s+)?(?:we\s+are|we're)\s+(outside|inside)\s+(?:the\s+)?([\s\S]+)$/i;
 const HEADING_IT = /^(interno|esterno|int\.?|ext\.?|fuori|dentro)\s+([\p{L}][\p{L}'’ -]{1,40}?)\s*(?:-\s*|,\s*|\s+)(giorno|di giorno|notte|di notte|mattina|la mattina|sera|la sera|pomeriggio|alba|all['’]?alba|tramonto|al tramonto|day|night|morning|evening|afternoon|dawn|dusk)\s*[.,]\s*([\s\S]*)$/iu;
+/** A bare heading with no punctuation after it: "esterno casa notte". */
+const BARE_HEADING_IT = /^(interno|esterno|int\.?|ext\.?|fuori|dentro)\s+([\p{L}][\p{L}'’ -]{1,40}?)\s*(?:-\s*|,\s*|\s+)(giorno|di giorno|notte|di notte|mattina|la mattina|sera|la sera|pomeriggio|alba|all['’]?alba|tramonto|al tramonto|day|night|morning|evening|afternoon|dawn|dusk)\s*$/iu;
 
 export function parseQuickScene(prompt: string): QuickScene | null {
   const input = prompt.trim();
@@ -133,6 +135,15 @@ export function parseQuickScene(prompt: string): QuickScene | null {
     if (!place || place.length > 60) return null;
     const heading = `${prefixFor(direction)} ${place.toUpperCase()}${time ? ` - ${timeWord(time)}` : ''}`;
     return sceneResult(heading, rest);
+  }
+
+  // A heading on its own, with no punctuation or action after it.
+  const bare = input.match(BARE_HEADING_IT);
+  if (bare) {
+    const place = bare[2].trim();
+    if (place) {
+      return { heading: `${prefixFor(bare[1])} ${place.toUpperCase()} - ${timeWord(bare[3])}` };
+    }
   }
 
   // "interno casa giorno, <action>" (also INT./EXT. and the English times).

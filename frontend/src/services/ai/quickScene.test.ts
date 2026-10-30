@@ -27,6 +27,12 @@ describe('parseQuickScene', () => {
     });
   });
 
+  it('reads a heading with no punctuation or action after it', () => {
+    expect(parseQuickScene('esterno casa notte')).toEqual({ heading: 'EXT. CASA - NIGHT' });
+    expect(parseQuickScene('interno casa giorno')).toEqual({ heading: 'INT. CASA - DAY' });
+    expect(parseQuickScene('EXT. LAUNDRY - NIGHT')).toEqual({ heading: 'EXT. LAUNDRY - NIGHT' });
+  });
+
   it('understands the English move', () => {
     expect(parseQuickScene('We are outside the house, a little later. Vilgax waits.')).toEqual({
       heading: 'EXT. HOUSE - LATER',
