@@ -30,7 +30,7 @@ import {
   FormatOverride, CustomElement, DualDialogue, DualDialogueColumn,
   TitlePage,
   AvBlock, AvRow, AvCell, AvPara, AvShot, AvDirection, AvGraphic, AvImage, AvKeymap, AvCueDecorations,
-  StartsNewPage, Bookmark, Alternates, Suggestions,
+  StartsNewPage, Bookmark, Alternates, Suggestions, AutoUppercase,
 } from '../editor/extensions';
 import { ElementNumbers, ELEMENT_NUMBERS_REFRESH } from '../editor/extensions/ElementNumbers';
 import { FocusMode, FOCUS_MODE_REFRESH, FOCUS_MODE_SHORTCUT } from '../editor/extensions/FocusMode';
@@ -129,6 +129,7 @@ import { DEFAULT_SCRIPT_PROFILE, normalizeScriptProfile } from '../utils/scriptP
 import { restoreRevisionState } from '../utils/revisionState';
 import { characterKey } from '../utils/nodeText';
 import { buildScriptIndex, emptyScriptIndex, suggestSmartType, type BlockLike, type ScriptIndex } from '../editor/smartType';
+import { ELEMENT_SHORTCUT_TYPES } from '../utils/elementShortcuts';
 import { computeContdChanges, type ContdBlock } from '../editor/contdAuto';
 import { useBackupScheduler } from '../hooks/useBackupScheduler';
 import { useRecoverySnapshot } from '../hooks/useRecoverySnapshot';
@@ -1521,7 +1522,12 @@ const ScreenplayEditor: React.FC = () => {
     suggestions: string[];
     from: number;
   }>({ visible: false, position: { top: 0, left: 0 }, suggestions: [], from: 0 });
-  const smartTypeDismissedRef = useRef(false);
+  /**
+   * The exact block text the popup was dismissed at, or accepted into. Hidden
+   * only while the text is unchanged, so typing again — or accepting a prefix —
+   * never leaves the writer without suggestions until they change line.
+   */
+  const smartTypeHiddenForRef = useRef<string | null>(null);
 
   const [formatPanelOpen, setFormatPanelOpen] = useState(false);
   const renamingCharacter = useEditorStore((s) => s.renamingCharacter);
@@ -1921,7 +1927,7 @@ const ScreenplayEditor: React.FC = () => {
       name: 'elementShortcuts',
       priority: 999,
       addKeyboardShortcuts() {
-        const types = ['sceneHeading', 'action', 'character', 'dialogue', 'parenthetical', 'transition', 'general', 'shot'];
+        const types = ELEMENT_SHORTCUT_TYPES;
         const shortcuts: Record<string, any> = {};
         types.forEach((type, i) => {
           shortcuts[`Mod-${i + 1}`] = ({ editor }: { editor: any }) => {
@@ -2126,7 +2132,12 @@ const ScreenplayEditor: React.FC = () => {
       ContdCaseExtension,
       SearchExtension,
       TrackChangesExtension,
-      ...(isHistoryMode ? [] : [EnforceGuardExtension, EnterHandlerExtension, TabHandlerExtension, ElementShortcutExtension, PasteFountainExtension]),
+      ...(isHistoryMode ? [] : [
+        EnforceGuardExtension, EnterHandlerExtension, TabHandlerExtension, ElementShortcutExtension, PasteFountainExtension,
+        // A viewer in a collaboration session must not write, and that
+        // includes normalising a line's case.
+        AutoUppercase.configure({ canNormalise: () => !(collabMode && collabRole === 'viewer') }),
+      ]),
       SpellCheck,
       Grammar,
       ...pluginRegistry.getEditorExtensions(),
@@ -2146,6 +2157,13 @@ const ScreenplayEditor: React.FC = () => {
       transformPastedHTML: (html) => stripNoteBackgrounds(html),
     },
     onSelectionUpdate: ({ editor: ed }) => {
+      const type = resolveActiveElement(ed);
+      if (type) setActiveElement(type);
+    },
+    // A shortcut that changes the element type (Ctrl/⌘+1 … 8) moves no caret,
+    // so `onSelectionUpdate` never fires and the toolbar's element picker kept
+    // showing the previous type. Every transaction can change it.
+    onTransaction: ({ editor: ed }) => {
       const type = resolveActiveElement(ed);
       if (type) setActiveElement(type);
     },
@@ -2653,12 +2671,24 @@ const ScreenplayEditor: React.FC = () => {
       const element = $from.parent.type.name;
       if (element !== 'character' && element !== 'sceneHeading' && element !== 'transition') {
         hide();
-        smartTypeDismissedRef.current = false;
+        smartTypeHiddenForRef.current = null;
         return;
       }
-      if (smartTypeDismissedRef.current) return;
 
       const text = $from.parent.textContent;
+      // A dismissal (or an accepted item) hides the popup for that exact text
+      // only: the next keystroke offers again, and Tab after accepting a
+      // prefix cannot accept a location the writer never asked for.
+      if (smartTypeHiddenForRef.current !== null) {
+        if (smartTypeHiddenForRef.current === text) return;
+        smartTypeHiddenForRef.current = null;
+      }
+      // An IME composition owns the text being built; rewriting it with a
+      // completion would break the composition.
+      if (editor.view.composing) {
+        hide();
+        return;
+      }
       // A hard break is a leaf node with no text, so the offset would no
       // longer map to a document position; those blocks have no completions.
       if ($from.parent.content.size !== text.length) {
@@ -5107,6 +5137,9 @@ const ScreenplayEditor: React.FC = () => {
     const { $from } = editor.state.selection;
     const start = $from.start() + smartTypeState.from;
     const end = $from.end();
+    // The text this produces, so the popup stays closed until the next
+    // keystroke instead of reopening on the word just accepted.
+    smartTypeHiddenForRef.current = $from.parent.textContent.slice(0, smartTypeState.from) + item;
     editor.chain().focus()
       .command(({ tr }) => {
         tr.insertText(item, start, end);
@@ -5117,9 +5150,12 @@ const ScreenplayEditor: React.FC = () => {
   }, [editor, smartTypeState.from]);
 
   const handleSmartTypeDismiss = useCallback(() => {
+    if (editor) {
+      const { $from } = editor.state.selection;
+      smartTypeHiddenForRef.current = $from.parent.textContent;
+    }
     setSmartTypeState(s => ({ ...s, visible: false }));
-    smartTypeDismissedRef.current = true;
-  }, []);
+  }, [editor]);
 
   // --- Click on script note highlight → auto-filter notes panel ---
   // Only opens the panel when note highlights are visible (notesVisible).
