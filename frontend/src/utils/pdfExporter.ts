@@ -25,6 +25,7 @@ import {
   type ProgressHandler, type StyledText, type UnicodeFallbacks,
 } from './pdfUnicodeFont';
 import { embedCustomFonts, type EmbeddedFace } from './pdfCustomFonts';
+import { layoutShaped, drawShaped, shapedWidth, shapedAsString } from './pdfShapedText';
 import { genericFor } from './fonts';
 import { isNonPrintingType } from './nonPrinting';
 import {
@@ -222,12 +223,21 @@ interface FontContext {
  * spaced and measured there.
  */
 interface DrawnPiece {
-  /** The text as the face needs it ordered — see utils/devanagari. */
+  /**
+   * The text as the face needs it ordered — see utils/indic — or, for a face
+   * HarfBuzz shapes, as it was typed.
+   */
   text: string;
   face: string;
   charSpace: number;
   /** Whether its width is the character count on Final Draft's cell. */
   fdCell: boolean;
+  /**
+   * Set for a shaped face: the piece is shaped when it is drawn, in whichever
+   * weight is current then, and this reordering is what is drawn instead if
+   * it cannot be — see utils/pdfShapedText.
+   */
+  unshaped?: (text: string) => string;
 }
 
 /**
@@ -278,10 +288,11 @@ function drawnPieces(
     ? [asBase(text)]
     : segmentByFace(text, fonts.fallbacks).map((segment): DrawnPiece => (segment.fallback
       ? {
-        text: segment.fallback.shape(segment.text),
+        text: segment.fallback.shaped ? segment.text : segment.fallback.shape(segment.text),
         face: segment.fallback.id,
         charSpace: segment.fallback.charSpace,
         fdCell: segment.fallback.monospace,
+        ...(segment.fallback.shaped ? { unshaped: segment.fallback.shape } : {}),
       }
       : asBase(segment.text)));
 
@@ -360,10 +371,31 @@ function drawPieces(
     // painted order is asserted end to end in pdfExporter.rtl.test.ts, so a
     // jsPDF upgrade that changes this fails there rather than in a writer's
     // PDF.
+    if (piece.unshaped) {
+      const run = layoutShaped(pdf, piece.text);
+      if (run) {
+        cursorX += drawShaped(pdf, run, cursorX, y);
+        continue;
+      }
+      const text = piece.unshaped(piece.text);
+      pdf.text(text, cursorX, y, { charSpace: piece.charSpace, isInputVisual: false });
+      cursorX += pdf.getTextWidth(text);
+      continue;
+    }
     pdf.text(piece.text, cursorX, y, { charSpace: piece.charSpace, isInputVisual: false });
     cursorX += pieceWidth(pdf, piece);
   }
   return cursorX;
+}
+
+/**
+ * A piece as one string to hand jsPDF directly — for text jsPDF itself has to
+ * place, such as the rotated watermark. The current face must be the piece's.
+ */
+function pieceAsString(pdf: jsPDF, piece: DrawnPiece): string {
+  if (!piece.unshaped) return piece.text;
+  const run = layoutShaped(pdf, piece.text);
+  return (run && shapedAsString(run)) ?? piece.unshaped(piece.text);
 }
 
 function setFontStyle(pdf: jsPDF, bold: boolean, italic: boolean, face = 'courier'): void {
@@ -394,6 +426,10 @@ function setFontStyle(pdf: jsPDF, bold: boolean, italic: boolean, face = 'courie
  */
 function pieceWidth(pdf: jsPDF, piece: DrawnPiece): number {
   if (piece.fdCell) return piece.text.length * FD_CHAR_WIDTH_PT;
+  if (piece.unshaped) {
+    const run = layoutShaped(pdf, piece.text);
+    return run ? shapedWidth(pdf, run) : pdf.getTextWidth(piece.unshaped(piece.text));
+  }
   return pdf.getTextWidth(piece.text);
 }
 
@@ -1862,7 +1898,6 @@ function drawWatermark(
   // The face that can write it — a name in Cyrillic needs the fallback.
   const pieces = drawnPieces(text, 'Helvetica', fonts, { freeFlow: true });
   const face = pieces.length === 1 ? pieces[0].face : 'helvetica';
-  const drawText = pieces.length === 1 ? pieces[0].text : text;
 
   const api = pdf as unknown as {
     GState?: new (params: { opacity: number }) => unknown;
@@ -1874,6 +1909,8 @@ function drawWatermark(
   if (api.GState && api.setGState) api.setGState(new api.GState({ opacity }));
   pdf.setTextColor(110, 110, 110);
   setFontStyle(pdf, !footer, false, face);
+  // Read once the face is set: a shaped one is shaped in the weight it is drawn in.
+  const drawText = pieces.length === 1 ? pieceAsString(pdf, pieces[0]) : text;
 
   if (footer) {
     pdf.setFontSize(9);
