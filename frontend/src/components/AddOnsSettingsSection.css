@@ -87,6 +87,20 @@
   margin-top: 4px;
 }
 
+/* An add-on's own form fields fill the dialog, whatever classes they use. */
+.addon-settings input:not([type='checkbox']):not([type='radio']),
+.addon-settings select,
+.addon-settings textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  font-size: 14px;
+  color: var(--fd-text);
+  background: var(--fd-input-bg);
+  border: 1px solid var(--fd-border);
+  border-radius: 4px;
+}
+
 .addon-forget {
   display: block;
   font-size: 13px;

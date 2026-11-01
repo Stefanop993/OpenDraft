@@ -273,6 +273,13 @@
     { page: 'Keyboard Shortcuts', title: 'View Shortcuts', section: 'View', text: 'Shift Cmd F enter leave focus mode. Esc leaves focus mode.', url: 'keyboard-shortcuts.html#view-shortcuts' },
     { page: 'Keyboard Shortcuts', title: 'Formatting Shortcuts', section: 'Formatting', text: 'Cmd B bold. Cmd I italic. Cmd U underline.', url: 'keyboard-shortcuts.html#formatting-shortcuts' },
     { page: 'Keyboard Shortcuts', title: 'Element Shortcuts', section: 'Elements', text: 'Cmd 1 scene heading. Cmd 2 action. Cmd 3 character. Cmd 4 dialogue. Cmd 5 parenthetical. Cmd 6 transition. Cmd 7 general. Cmd 8 shot.', url: 'keyboard-shortcuts.html#elements' },
+
+    // Plugin & Add-on Development
+    { page: 'Plugin & Add-on Development', title: 'Plugin & Add-on Development', section: '', text: 'Plugins add-ons extend OpenDraft developer guide. Turn add-ons on off System Settings Add-ons. Optional features AI assistant privacy what leaves your device delete saved settings API key.', url: 'plugin-development.html' },
+    { page: 'Plugin & Add-on Development', title: 'The Plugin Object', section: 'Plugin Object', text: 'pluginRegistry register id name version optIn description privacy settings onActivate onDeactivate forgetSettings menuItems panels right-sidebar status-bar routes editorExtensions importers exporters reports grammarProviders.', url: 'plugin-development.html#plugin-object' },
+    { page: 'Plugin & Add-on Development', title: 'Rules for Add-ons', section: 'Rules', text: 'Off by default opt-in. Privacy statement. Settings when turned on registerSave. Forget settings. No toolbar buttons Tools menu sidebar panel. Preview before insert undo. Error handling. AI is always an add-on.', url: 'plugin-development.html#add-on-rules' },
+    { page: 'Plugin & Add-on Development', title: 'Sample AI Assistant Add-on', section: 'Sample', text: 'AI assistant sample code Ollama LM Studio llama.cpp OpenAI-compatible server chat completions local model. src addons ai-assistant index settingsStore client AssistantSettingsForm AssistantPanel CORE_ADDONS register.', url: 'plugin-development.html#sample-ai-assistant' },
+    { page: 'Plugin & Add-on Development', title: 'Testing Your Add-on', section: 'Testing', text: 'tsc eslint vitest boundary test mock AI server test-script mock_ai_server.py localhost 11435. Checklist turn on turn off menu panel.', url: 'plugin-development.html#testing' },
   ];
 
   // DOM elements
