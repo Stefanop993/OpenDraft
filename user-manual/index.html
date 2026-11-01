@@ -90,6 +90,10 @@
     <a href="page-setup.html" class="sidebar-link">Page Setup</a>
     <a href="keyboard-shortcuts.html" class="sidebar-link">Keyboard Shortcuts</a>
   </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Developers</div>
+    <a href="plugin-development.html" class="sidebar-link">Plugin &amp; Add-on Development</a>
+  </div>
 </nav>
 
 <!-- Main Content -->
@@ -175,6 +179,18 @@
     </div>
 
     <h2 id="whats-new">What's New</h2>
+
+    <h3>v2.8.1</h3>
+    <ul>
+      <li><strong>Fade In Scripts Keep Their Layout</strong> &mdash; Fade In and Open Screenplay Format files open with their own page size, margins and element formatting, and saving or exporting writes those settings back instead of a fixed layout (#181). See <a href="format-compatibility.html">Format Compatibility</a>.</li>
+      <li><strong>Your Original Files Are Safe</strong> &mdash; Before saving over a Final Draft, Fade In or Fountain file for the first time, OpenDraft asks whether to save a copy, cancel or overwrite. It backs up the original first and keeps the newest five backups. On iPhone, iPad and Android, <em>File &rarr; Recover Original File&hellip;</em> gets a backup back (#181).</li>
+      <li><strong>OpenDraft No Longer Takes Over Other Apps&rsquo; Files</strong> &mdash; Only <code>.odraft</code> opens in OpenDraft by default. For other screenplay formats it is offered as a choice, and <code>.txt</code> is no longer claimed. Updating from 2.8.0 on Windows restores your previous defaults (#179).</li>
+      <li><strong>US Letter by Default</strong> &mdash; New scripts and <em>Reset Default</em> use US Letter with 1.5&Prime; / 1&Prime; side margins; existing scripts keep their own settings (#177). See <a href="page-setup.html">Page Setup</a>.</li>
+      <li><strong>A Scrollbar You Can Grab</strong> &mdash; A full-size scrollbar beside the script on every desktop, Windows included (#178).</li>
+      <li><strong>Dual Dialogue in Word</strong> &mdash; Exported side by side, and read back as dual dialogue on import.</li>
+      <li><strong>For Developers</strong> &mdash; A new <a href="plugin-development.html">Plugin &amp; Add-on Development</a> guide, with a complete sample add-on.</li>
+      <li><strong>Also Fixed</strong> &mdash; Several Suggest mode fixes (one suggestion per typed word, dragging headings, beat links, collaborators who share a name). Versions of a line or scene can&rsquo;t be changed during a live collaboration session. Saving through a symlink updates the real file. Fade In import and export margin fixes.</li>
+    </ul>
 
     <h3>v2.8.0</h3>
     <ul>
@@ -582,7 +598,7 @@
 
   </div>
   <footer class="footer">
-    OpenDraft User Manual &middot; v2.8.0 &middot; Made by Proteus Technologies
+    OpenDraft User Manual &middot; v2.8.1 &middot; Made by Proteus Technologies
   </footer>
 </main>
 

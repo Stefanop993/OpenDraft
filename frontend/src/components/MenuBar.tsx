@@ -1,3 +1,6 @@
+import SourceBackupRecovery from './SourceBackupRecovery';
+import { isTauri as isNativeApp, getOS as nativeOS } from '../services/platform';
+import { ExternalSaveCancelled, externalScreenplay } from '../services/externalSave';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Editor } from '@tiptap/react';
@@ -268,6 +271,8 @@ import { omitSceneTransaction, sceneOmittedAt } from '../editor/omitScene';
  *  and how scenes are numbered. */
 function osfExtras(s: ReturnType<typeof useEditorStore.getState>) {
   return {
+    pageLayout: s.pageLayout,
+    elementRules: useFormattingTemplateStore.getState().getActiveTemplate().rules,
     revisions: { color: s.revisionMode ? s.revisionColor : '', settings: s.revisionSettings },
     sceneNumbers: { visible: s.sceneNumbersVisible, locked: s.sceneNumbersLocked },
   };
@@ -490,7 +495,10 @@ const MenuBar: React.FC<MenuBarProps> = ({
     const docBefore = editor?.state.doc;
     setSaveStatus('saving');
     try {
-      await saveDocumentInPlace(origin.bookmark, await serializeForOrigin(origin.format));
+      // An automatic save never asks: until the writer has agreed to overwrite
+      // another application's file once, it is skipped and the document stays
+      // unsaved (ExternalSaveCancelled, below).
+      await saveDocumentInPlace(origin.bookmark, await serializeForOrigin(origin.format), { name: origin.name, warnings: origin.warnings, background: auto });
       // The writer may have opened something else while the write was in
       // flight; the status now belongs to that document, not this one.
       if (useEditorStore.getState().documentOrigin?.bookmark !== origin.bookmark) return true;
@@ -506,6 +514,7 @@ const MenuBar: React.FC<MenuBarProps> = ({
       clearRecoverySnapshot();
       return true;
     } catch (err) {
+      if (err instanceof ExternalSaveCancelled) { setSaveStatus('unsaved'); return false; }
       console.error(auto ? 'Auto-save in place failed:' : 'Save in place failed:', err);
       const msg = err instanceof Error ? err.message : String(err);
       // Left in the error state on purpose: the file did NOT receive this
@@ -546,10 +555,15 @@ const MenuBar: React.FC<MenuBarProps> = ({
       setSaveStatus('saved');
       // A script linked to a file on disk is safe in the library either way,
       // but the writer pressed Save expecting their file to have it too.
-      const fileStatus = useLinkedFileStore.getState().byScript[currentScriptId];
+      let fileStatus = useLinkedFileStore.getState().byScript[currentScriptId];
+      if (fileStatus?.state === 'pending' && externalScreenplay(fileStatus.path)) {
+        const { saveLinkedFileWithReview } = await import('../services/linkedFiles');
+        await saveLinkedFileWithReview(currentProject.id, currentScriptId);
+        fileStatus = useLinkedFileStore.getState().byScript[currentScriptId];
+      }
       if (fileStatus?.state === 'pending' && fileStatus.error) {
         const name = fileStatus.path.split(/[/\\]/).pop() || fileStatus.path;
-        showToast(`Saved in OpenDraft, but not to ${name}: ${fileStatus.error}. OpenDraft will keep trying.`, 'error');
+        showToast(`Saved in OpenDraft, but not to ${name}: ${fileStatus.error}. ${externalScreenplay(fileStatus.path) ? 'Use Save to review the external file again.' : 'OpenDraft will keep trying.'}`, 'error');
       }
       // The user's real copy now holds this text, so there is nothing left to
       // recover. Done here as well as in the snapshot hook because an explicit
@@ -1062,6 +1076,7 @@ const MenuBar: React.FC<MenuBarProps> = ({
 
   // ── About / What's New ──
   const [recoverBackupOpen, setRecoverBackupOpen] = useState(false);
+  const [sourceBackupOpen, setSourceBackupOpen] = useState(false);
   // Backups asked for before a folder was chosen: ask for one here, then go on.
   const [backupFolderPrompt, setBackupFolderPrompt] = useState<'backup' | 'open' | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -1446,7 +1461,7 @@ const MenuBar: React.FC<MenuBarProps> = ({
       setScripts([]);
       // Not setImportedSource: this is not a copy. Save writes back here.
       store.setImportedSource(null);
-      store.setDocumentOrigin({ bookmark: opened.bookmark, name: opened.name, format: ext });
+      store.setDocumentOrigin({ bookmark: opened.bookmark, name: opened.name, format: ext, warnings: imported.warnings });
       useBackupStatusStore.getState().noteDocumentOpened();
 
       for (const w of imported.warnings) console.warn('[Open in place]', w);
@@ -1703,6 +1718,7 @@ const MenuBar: React.FC<MenuBarProps> = ({
     store.setCharacterProfiles([]);
     store.setScenes([]);
     store.setPageLayout({ ...DEFAULT_PAGE_LAYOUT });
+    useEditorStore.setState({ sourceFidelity: null });
     store.resetRevisionState();
     // A new screenplay starts at Standard pacing with no genres.
     store.setScriptProfile(DEFAULT_SCRIPT_PROFILE);
@@ -2820,6 +2836,7 @@ const MenuBar: React.FC<MenuBarProps> = ({
         // App builds only: a browser tab has nothing that can hold on to a
         // folder across a reload. Omitted rather than disabled — a permanently
         // greyed submenu just invites bug reports.
+        ...(isNativeApp() && ['ios', 'android'].includes(nativeOS()) ? [{ icon: <FaHistory />, label: 'Recover Original File…', action: () => setSourceBackupOpen(true) }] : []),
         ...(backupsSupported() ? [
           { separator: true, label: '' },
           {
@@ -3922,6 +3939,7 @@ const MenuBar: React.FC<MenuBarProps> = ({
         }}
       />
     )}
+    {sourceBackupOpen && <SourceBackupRecovery onClose={() => setSourceBackupOpen(false)} />}
     <RecoverBackupDialog
       open={recoverBackupOpen}
       onClose={() => setRecoverBackupOpen(false)}
@@ -3940,12 +3958,22 @@ const MenuBar: React.FC<MenuBarProps> = ({
           <div className="dialog-header">About Open Draft</div>
           <div className="dialog-body about-body">
             <div className="about-title">Open Draft</div>
-            <div className="about-version">Version 2.8.0</div>
+            <div className="about-version">Version 2.8.1</div>
             <div className="about-tagline">Free, open-source screenwriting software</div>
 
             <div className="about-whats-new">
-              <div className="about-section-title">What's New in 2.8.0</div>
+              <div className="about-section-title">What's New in 2.8.1</div>
               <div className="about-changelog">
+              <div className="about-subsection-title">v2.8.1</div>
+              <ul className="about-list">
+                <li><strong>Fade In Scripts Keep Their Layout</strong> &mdash; A Fade In <code>.fadein</code> or Open Screenplay Format <code>.osf</code> file now opens with its own page size and margins, and each element keeps its indents, spacing, alignment and styles. The title page uses the same page. Saving or exporting writes the script&rsquo;s actual settings back, instead of a fixed US Letter layout, so a script that goes back and forth between Fade In and OpenDraft no longer drifts (#181).</li>
+                <li><strong>Your Original Files Are Safe</strong> &mdash; The first time you save over a Final Draft, Fade In or Fountain file you opened, OpenDraft asks first: <em>Save a Copy</em>, <em>Cancel</em>, or <em>Overwrite</em> once you confirm. The original is backed up before it is replaced (the newest five backups of each file are kept), and a save that fails leaves the original untouched. After that, saves go ahead without asking, unless another application changes the file. Auto-save never overwrites another app&rsquo;s file you haven&rsquo;t approved. On iPhone, iPad and Android, <em>File &rarr; Recover Original File&hellip;</em> gets a backed-up original back (#181).</li>
+                <li><strong>OpenDraft No Longer Takes Over Other Apps&rsquo; Files</strong> &mdash; OpenDraft opens <code>.odraft</code> files by default and is only <em>offered</em> for Final Draft, Fade In, Fountain, Highland, WriterDuet, Celtx and OSF files, so the app you already use for them stays the default. Plain <code>.txt</code> files are no longer claimed (you can still open and import them). Updating from 2.8.0 on Windows gives your previous defaults back, <code>.txt</code> included. On Linux, OpenDraft is no longer offered for every text, XML, ZIP and JSON file (#179).</li>
+                <li><strong>US Letter by Default</strong> &mdash; New scripts and <em>Page Setup &rarr; Reset Default</em> now use US Letter (8.5&Prime; &times; 11&Prime;) with 1.5&Prime; and 1&Prime; side margins, as the manual says. They had been A4. Scripts you already have keep their own page settings (#177).</li>
+                <li><strong>A Scrollbar You Can Grab</strong> &mdash; The script now always has a full-size scrollbar to drag, on Windows too, with or without the Navigator open (#178).</li>
+                <li><strong>Dual Dialogue in Word</strong> &mdash; Word export used to drop dual dialogue. Both speeches now appear side by side, with their cues, parentheticals and styling, and a Word file exported this way imports back as dual dialogue.</li>
+                <li><strong>Also Fixed</strong> &mdash; In Suggest mode, a typed word is one suggestion instead of one per letter; dragging a scene heading no longer disconnects the suggester; a Beat Board beat can be linked to a scene during a suggester&rsquo;s session; and two collaborators invited under the same name can no longer withdraw each other&rsquo;s suggestions. Versions of a line or scene can&rsquo;t be added or switched during a live collaboration session, where that could duplicate text; end the session (or leave it) first. Saving a script opened through a shortcut (symlink) now updates the real file. A Fade In file whose margins leave no room for text opens with standard margins instead of failing, and Fade In export on A4 no longer pushes lines into the right margin.</li>
+              </ul>
               <div className="about-subsection-title">v2.8.0</div>
               <ul className="about-list">
                 <li><strong>Bring Your Scripts From Anywhere</strong> &mdash; Import a screenplay PDF, a Highland <code>.highland</code>, a WriterDuet <code>.wdz</code> or a Celtx <code>.celtx</code> file. A PDF opens in an <em>Import Preview</em> first, where you can fix any misread lines in bulk &mdash; select every line read as Action and make them General in one step &mdash; before anything replaces the open script.</li>
@@ -4539,7 +4567,7 @@ const MenuBar: React.FC<MenuBarProps> = ({
           <div className="dialog-header">Editing a .{foreignFormatNotice.extension} file</div>
           <div className="dialog-body">
             <p style={{ margin: '0 0 8px 0', fontSize: 14, color: 'var(--fd-text)' }}>
-              Save now writes straight back to <strong>{foreignFormatNotice.name}</strong>.
+              Save will ask before overwriting <strong>{foreignFormatNotice.name}</strong>. Save As creates a working copy and keeps the source untouched.
             </p>
             <p style={{ margin: '0 0 8px 0', fontSize: 14, color: 'var(--fd-text)' }}>
               That file is in another application&apos;s format, and it can only hold

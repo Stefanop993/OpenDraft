@@ -1,25 +1,13 @@
-New tools for writing, rewriting and sending your script out.
+Your scripts from other apps, kept the way they were.
 
-BRING YOUR SCRIPTS WITH YOU
-Import a script you only have as a PDF, or a Highland, WriterDuet or Celtx file. Before a PDF opens, you can check how each line was read and fix several at once.
+FADE IN SCRIPTS KEEP THEIR LAYOUT
+Fade In scripts now open with their own page size, margins and formatting, and keep them when you save, so a script that goes back and forth no longer changes shape.
 
-WATERMARKS, PASSWORDS AND SIDES
-Put CONFIDENTIAL, or each reader's name, on every page, and add a password. Print or export just the scenes an actor needs on their original pages, with the rest crossed out, two pages to a sheet if you like.
+YOUR ORIGINALS ARE SAFE
+Before saving over a Final Draft, Fade In or Fountain file for the first time, OpenDraft asks whether to save a copy instead, and backs up the original. File > Recover Original File brings a backup back.
 
-REPORTS
-Scene, character, location, cast, breakdown and notes reports, as a spreadsheet or a PDF.
+DUAL DIALOGUE IN WORD
+Side-by-side dialogue now comes through in Word exports, and back again when you import them.
 
-REWRITE WITH EASE
-Rename a character everywhere at once. Read and polish everything one character says in the Dialogue Tuner. Keep other versions of a line or a whole scene beside it and switch between them, from Edit > Alternates.
-
-PLAN YOUR STORY
-Name your plotlines, put scenes in them, and see them all across the script on the Story Timeline. Link Beat Board beats to the scenes that carry them.
-
-COMIC BOOK SCRIPTS
-A new format for comics and graphic novels, with pages and panels numbered for you.
-
-NOTES YOU CAN DISCUSS
-Reply to notes, resolve them, assign them to a collaborator and @mention people.
-
-KEEP WRITING
-Daily goals, timed sprints and a calendar of what you wrote. Focus Mode with typewriter scrolling. Bookmarks, and macros for text you type often.
+ALSO FIXED
+New scripts start on US Letter, as the manual says. Several fixes to suggesting changes during collaboration.
