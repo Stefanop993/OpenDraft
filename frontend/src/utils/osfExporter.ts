@@ -351,9 +351,16 @@ export function exportOSF(doc: JSONContent, options: OSFExportOptions = {}): str
     if (style.index !== 0) attrs.basestylename = 'Normal Text';
     else delete attrs.basestylename;
     if ([1, 3, 4].includes(style.index) && !('keepwithnext' in attrs)) attrs.keepwithnext = '1';
+    // An indent reaching into the margin is written only when the source file
+    // asked for one. Otherwise it is a template's absolute indent on a page it
+    // was not drawn for — the standard 7.5" right edge on A4 — and the editor
+    // already clamps it to the margin, so the file is clamped the same way.
+    const sourceIndents = canonicalOsfStyle(retained);
+    const indent = (osf: number, key: 'leftindent' | 'rightindent') =>
+      String(osf < 0 && !(Number(sourceIndents[key]) < 0) ? 0 : osf);
     if (r) Object.assign(attrs, {
-      leftindent: String(inchesToOsf(r.leftIndent - layout.leftMargin)),
-      rightindent: String(inchesToOsf(layout.pageWidth - layout.rightMargin - r.rightIndent)),
+      leftindent: indent(inchesToOsf(r.leftIndent - layout.leftMargin), 'leftindent'),
+      rightindent: indent(inchesToOsf(layout.pageWidth - layout.rightMargin - r.rightIndent), 'rightindent'),
       spacebefore: String(r.marginTop / 12), align: r.textAlign,
       bold: r.bold ? '1' : '0', italic: r.italic ? '1' : '0', underline: r.underline ? '1' : '0',
       strikethrough: r.strikethrough ? '1' : '0', allcaps: r.textTransform === 'uppercase' ? '1' : '0',

@@ -30,6 +30,27 @@ export function reviewExternalSave(
 }
 export const externalScreenplay = (name: string): boolean =>
   /\.(fdx|fadein|osf|fountain|txt|highland|wdz|celtx)$/i.test(name);
+
+/**
+ * Files OpenDraft has overwritten in this session with the writer's consent,
+ * mapped to the modification time its own save left (0 where the platform has
+ * no way to read one back).
+ *
+ * The original was backed up on that first overwrite, so a later save is only
+ * replacing OpenDraft's own output: it neither asks again nor copies the file
+ * again. If the time no longer matches, something else has written the file
+ * since, and the next save is treated as a first overwrite once more.
+ */
+const ownWrites = new Map<string, number>();
+export function recordOwnWrite(bookmark: string, modifiedMs: number): void {
+  ownWrites.set(bookmark, modifiedMs);
+}
+export function ownWriteTime(bookmark: string): number | undefined {
+  return ownWrites.get(bookmark);
+}
+export function forgetOwnWrite(bookmark: string): void {
+  ownWrites.delete(bookmark);
+}
 export class ExternalSaveCancelled extends Error {
   readonly copySaved: boolean;
   constructor(copySaved = false) {

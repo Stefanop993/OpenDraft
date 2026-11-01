@@ -287,32 +287,49 @@ fn android_read_content_uri_bytes(uri_str: &str) -> Result<ContentUriBytes, Stri
 /// bookmark: both survive a relaunch and both name the user's real file rather
 /// than a copy in the sandbox.
 #[tauri::command]
-fn write_content_uri(app: tauri::AppHandle, uri: String, contents: String) -> Result<(), String> {
-    write_content_uri_bytes(app, uri, contents.into_bytes())
+fn write_content_uri(
+    app: tauri::AppHandle,
+    uri: String,
+    contents: String,
+    source_name: Option<String>,
+    backup: Option<bool>,
+) -> Result<(), String> {
+    write_content_uri_bytes(app, uri, contents.into_bytes(), source_name, backup)
 }
 
 /// Write raw bytes to a content URI — the archive formats, which cannot go
 /// through the text path without being destroyed by the UTF-8 round trip.
+///
+/// Another application's file is copied to `source-backups` first, unless the
+/// caller says (`backup: false`) that it holds OpenDraft's own last save. An
+/// `.odraft` is never copied: it is the app's own format and loses nothing.
 #[tauri::command]
 fn write_content_uri_bytes(
     app: tauri::AppHandle,
     uri: String,
     contents: Vec<u8>,
+    source_name: Option<String>,
+    backup: Option<bool>,
 ) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
-        let original = read_content_uri_bytes(uri.clone())?;
-        let folder = app
-            .path()
-            .app_data_dir()
-            .map_err(|e| e.to_string())?
-            .join("source-backups");
-        safe_file::backup(&folder, &original.filename, &original.bytes)?;
+        if backup.unwrap_or(true) {
+            let original = read_content_uri_bytes(uri.clone())?;
+            let name = source_name.as_deref().unwrap_or(&original.filename);
+            if safe_file::external_name(name) {
+                let folder = app
+                    .path()
+                    .app_data_dir()
+                    .map_err(|e| e.to_string())?
+                    .join("source-backups");
+                safe_file::backup(&folder, name, &original.bytes)?;
+            }
+        }
         android_write_content_uri(&uri, &contents)
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = (uri, contents);
+        let _ = (app, uri, contents, source_name, backup);
         Err("Content URI writing is only supported on Android".to_string())
     }
 }
@@ -1176,20 +1193,27 @@ fn ios_write_in_place_bytes(
     bookmark: String,
     contents: Vec<u8>,
     source_name: Option<String>,
+    backup: Option<bool>,
 ) -> Result<(), String> {
     #[cfg(target_os = "ios")]
     {
-        let original = ios_read_in_place_bytes(bookmark.clone())?;
-        let folder = app
-            .path()
-            .app_data_dir()
-            .map_err(|e| e.to_string())?
-            .join("source-backups");
-        safe_file::backup(
-            &folder,
-            source_name.as_deref().unwrap_or("ios-source.original"),
-            &original,
-        )?;
+        // Same rule as Android: back up another application's file unless the
+        // caller knows it holds OpenDraft's own last save. A file whose name is
+        // unknown is backed up, to be safe.
+        let external = source_name.as_deref().map_or(true, safe_file::external_name);
+        if backup.unwrap_or(true) && external {
+            let original = ios_read_in_place_bytes(bookmark.clone())?;
+            let folder = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| e.to_string())?
+                .join("source-backups");
+            safe_file::backup(
+                &folder,
+                source_name.as_deref().unwrap_or("ios-source.original"),
+                &original,
+            )?;
+        }
         let c_bookmark = std::ffi::CString::new(bookmark.as_bytes())
             .map_err(|_| "Invalid bookmark".to_string())?;
         let ok = unsafe {
@@ -1198,13 +1222,14 @@ fn ios_write_in_place_bytes(
         if ok == 1 {
             Ok(())
         } else {
-            Err("Could not save to the original file. It may have been moved, renamed,                  or deleted, or its provider (such as Dropbox) may be offline."
+            Err("Could not save to the original file. It may have been moved, renamed, \
+                 or deleted, or its provider (such as Dropbox) may be offline."
                 .to_string())
         }
     }
     #[cfg(not(target_os = "ios"))]
     {
-        let _ = (bookmark, contents);
+        let _ = (app, bookmark, contents, source_name, backup);
         Err("This command is only available on iOS".to_string())
     }
 }
@@ -1216,8 +1241,9 @@ fn ios_write_in_place(
     bookmark: String,
     contents: String,
     source_name: Option<String>,
+    backup: Option<bool>,
 ) -> Result<(), String> {
-    ios_write_in_place_bytes(app, bookmark, contents.into_bytes(), source_name)
+    ios_write_in_place_bytes(app, bookmark, contents.into_bytes(), source_name, backup)
 }
 
 // ── iOS export commands ──────────────────────────────────────────────────
@@ -1834,14 +1860,16 @@ fn same_file_path(first: String, second: String) -> Result<bool, String> {
     }
 }
 
+/// `backup` (default true): copy another application's file aside before
+/// replacing it. The app passes false when the file holds its own last save.
 #[tauri::command]
-fn save_text_to_path(path: String, contents: String) -> Result<(), String> {
-    safe_file::replace(std::path::Path::new(&path), contents.as_ref())
+fn save_text_to_path(path: String, contents: String, backup: Option<bool>) -> Result<(), String> {
+    safe_file::replace(std::path::Path::new(&path), contents.as_ref(), backup.unwrap_or(true))
 }
 
 #[tauri::command]
-fn save_binary_to_path(path: String, contents: Vec<u8>) -> Result<(), String> {
-    safe_file::replace(std::path::Path::new(&path), contents.as_ref())
+fn save_binary_to_path(path: String, contents: Vec<u8>, backup: Option<bool>) -> Result<(), String> {
+    safe_file::replace(std::path::Path::new(&path), contents.as_ref(), backup.unwrap_or(true))
 }
 
 #[tauri::command]
@@ -1998,8 +2026,8 @@ fn delete_file(path: String) -> Result<(), String> {
 /// a half-written file. The temp file is created in the same directory so the
 /// rename stays within one filesystem.
 #[tauri::command(async)]
-fn save_text_atomic(path: String, contents: String) -> Result<(), String> {
-    safe_file::replace(std::path::Path::new(&path), contents.as_bytes())
+fn save_text_atomic(path: String, contents: String, backup: Option<bool>) -> Result<(), String> {
+    safe_file::replace(std::path::Path::new(&path), contents.as_bytes(), backup.unwrap_or(true))
 }
 
 /// Read a text file off the main thread, for files in a linked project folder.

@@ -113,12 +113,26 @@ export function parseOsfLayout(
     warnings.push(
       'OSF element-spacing multiplier is retained for export but is not rendered.',
     );
-  const layout = { ...DEFAULT_PAGE_LAYOUT, ...pageLayout };
-  if (
-    layout.leftMargin + layout.rightMargin >= layout.pageWidth ||
-    layout.topMargin + layout.bottomMargin >= layout.pageHeight * 72
-  )
-    throw new Error('OSF margins leave no printable page area.');
+  // Margins that leave no room to write are a damaged setting, not a reason to
+  // refuse the script: fall back to the default margins (and, if even those do
+  // not fit, the default page) and say so.
+  const printable = (l: PageLayout) =>
+    l.leftMargin + l.rightMargin < l.pageWidth &&
+    l.topMargin + l.bottomMargin < l.pageHeight * 72;
+  let layout: PageLayout = { ...DEFAULT_PAGE_LAYOUT, ...pageLayout };
+  if (!printable(layout)) {
+    for (const key of ['leftMargin', 'rightMargin', 'topMargin', 'bottomMargin'] as const)
+      delete pageLayout[key];
+    layout = { ...DEFAULT_PAGE_LAYOUT, ...pageLayout };
+    if (!printable(layout)) {
+      delete pageLayout.pageWidth;
+      delete pageLayout.pageHeight;
+      layout = { ...DEFAULT_PAGE_LAYOUT };
+    }
+    warnings.push(
+      "The file's margins leave no printable page area; OpenDraft's default page layout was used instead.",
+    );
+  }
   const styles: OsfSourceSettings['styles'] = {};
   for (const el of Array.from(
     root.getElementsByTagName('styles')[0]?.getElementsByTagName('style') ?? [],

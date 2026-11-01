@@ -13,7 +13,10 @@
  * On web / mobile browser: falls back to standard browser APIs
  * (anchor download for save, <input type="file"> for open).
  */
-import { guardedExternalSave, externalScreenplay, ExternalSaveCancelled } from '../services/externalSave';
+import {
+  guardedExternalSave, externalScreenplay, ExternalSaveCancelled,
+  recordOwnWrite, ownWriteTime, forgetOwnWrite,
+} from '../services/externalSave';
 import { isTauri, getOS } from '../services/platform';
 
 interface FileFilter {
@@ -79,11 +82,11 @@ async function saveFileTauri(
     throw new Error('Choose a different destination for Save a Copy. The original was left unchanged.');
   }
 
-  const stat = externalScreenplay(path) ? await invoke<{ exists: boolean }>('stat_path', { path }) : { exists: false };
-  if (stat.exists) {
-    try { await saveDocumentInPlace(path, data, { name: path }); }
-    catch (error) { if (error instanceof ExternalSaveCancelled) return error.copySaved; throw error; }
-  } else if (typeof data === 'string') {
+  // The save dialog has already asked whether to replace an existing file, so
+  // there is no second question here. Another application's file is still
+  // backed up beside it before it is replaced (the commands' default).
+  forgetOwnWrite(path);
+  if (typeof data === 'string') {
     await invoke('save_text_to_path', { path, contents: data });
   } else {
     await invoke('save_binary_to_path', { path, contents: Array.from(data) });
@@ -727,15 +730,31 @@ function pollForPick(
 export async function saveDocumentInPlace(
   bookmark: string,
   contents: string | Uint8Array,
-  options: { name?: string; warnings?: string[]; approved?: boolean } = {},
+  options: {
+    name?: string;
+    warnings?: string[];
+    /** The writer has just agreed to overwrite this file. */
+    approved?: boolean;
+    /** An automatic save: never asks a question; one that would need asking is skipped. */
+    background?: boolean;
+  } = {},
 ): Promise<void> {
   const { invoke } = await import('@tauri-apps/api/core');
   const name = options.name ?? bookmark;
-  if (!options.approved && externalScreenplay(name)) {
-    return guardedExternalSave({ name, warnings: options.warnings, contents,
-      write: () => saveDocumentInPlace(bookmark, contents, { ...options, approved: true }),
-      saveCopy: () => saveFile(contents, name.split(/[\\/]/).pop()!.replace(/(\.[^.]+)$/, '-copy$1'), undefined, { preserveOriginal: bookmark }),
-    });
+  const external = externalScreenplay(name);
+  // Back up another application's file before replacing it, except when it
+  // already holds OpenDraft's own last save from this session.
+  let backup = true;
+  if (external && !options.approved) {
+    if (await holdsOwnLastWrite(bookmark, invoke)) {
+      backup = false;
+    } else {
+      if (options.background) throw new ExternalSaveCancelled();
+      return guardedExternalSave({ name, warnings: options.warnings, contents,
+        write: () => saveDocumentInPlace(bookmark, contents, { ...options, approved: true }),
+        saveCopy: () => saveFile(contents, name.split(/[\\/]/).pop()!.replace(/(\.[^.]+)$/, '-copy$1'), undefined, { preserveOriginal: bookmark }),
+      });
+    }
   }
   // Tauri's IPC carries a byte array as a plain number array.
   const bytes = typeof contents === 'string' ? null : Array.from(contents);
@@ -743,18 +762,22 @@ export async function saveDocumentInPlace(
   if (isAndroidTauri()) {
     // On Android the bookmark is the content:// URI the picker returned.
     if (bytes) {
-      await invoke('write_content_uri_bytes', { uri: bookmark, contents: bytes });
+      await invoke('write_content_uri_bytes', { uri: bookmark, contents: bytes, sourceName: name, backup });
     } else {
-      await invoke('write_content_uri', { uri: bookmark, contents });
+      await invoke('write_content_uri', { uri: bookmark, contents, sourceName: name, backup });
     }
+    // A provider's file has no modification time to read back; 0 stands for
+    // "written by OpenDraft in this session".
+    if (external) recordOwnWrite(bookmark, 0);
     return;
   }
   if (isIOSTauri()) {
     if (bytes) {
-      await invoke('ios_write_in_place_bytes', { bookmark, contents: bytes, sourceName: name });
+      await invoke('ios_write_in_place_bytes', { bookmark, contents: bytes, sourceName: name, backup });
     } else {
-      await invoke('ios_write_in_place', { bookmark, contents, sourceName: name });
+      await invoke('ios_write_in_place', { bookmark, contents, sourceName: name, backup });
     }
+    if (external) recordOwnWrite(bookmark, 0);
     return;
   }
   if (!isTauri()) {
@@ -765,9 +788,43 @@ export async function saveDocumentInPlace(
   // temporary file, which is what keeps a half-written screenplay from
   // replacing a whole one if the machine gives up mid-save.
   if (bytes) {
-    await invoke('save_binary_to_path', { path: bookmark, contents: bytes });
+    await invoke('save_binary_to_path', { path: bookmark, contents: bytes, backup });
   } else {
-    await invoke('save_text_atomic', { path: bookmark, contents });
+    await invoke('save_text_atomic', { path: bookmark, contents, backup });
+  }
+  if (external) {
+    try {
+      const stat = await invoke<{ exists: boolean; modified_ms: number }>('stat_path', { path: bookmark });
+      if (stat.exists) recordOwnWrite(bookmark, stat.modified_ms);
+      else forgetOwnWrite(bookmark);
+    } catch (err) {
+      // Without the time, the next save cannot tell OpenDraft's output from a
+      // change made elsewhere, so it asks again — the safe direction.
+      console.warn('[save in place] could not read back the saved file\'s time:', err);
+      forgetOwnWrite(bookmark);
+    }
+  }
+}
+
+/**
+ * Whether the file still holds what OpenDraft itself last wrote to it in this
+ * session. On the desktop that is checked against the file's modification
+ * time; mobile document providers cannot report one, so there the session's
+ * own record is taken as it stands.
+ */
+async function holdsOwnLastWrite(
+  bookmark: string,
+  invoke: typeof import('@tauri-apps/api/core').invoke,
+): Promise<boolean> {
+  const recorded = ownWriteTime(bookmark);
+  if (recorded === undefined) return false;
+  if (isMobileTauri()) return true;
+  try {
+    const stat = await invoke<{ exists: boolean; modified_ms: number }>('stat_path', { path: bookmark });
+    return stat.exists && stat.modified_ms === recorded;
+  } catch (err) {
+    console.warn('[save in place] could not check whether the file changed since the last save:', err);
+    return false;
   }
 }
 

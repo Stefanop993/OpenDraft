@@ -8,21 +8,23 @@ OSF and Fade In import supported page dimensions, margins and inherited built-in
 
 Older OpenDraft versions may discard the embedded imported template and conversion warnings when saving a working copy. Keep the original and its recovery backups independently.
 
-Unsupported line-spacing multipliers, keep-with-next choices and source style/settings attributes are retained in source metadata where possible and reported as warnings. Custom styles may be mapped to a built-in element; their per-paragraph appearance is not guaranteed. Unsupported document sections and application-specific data can still be lost. Preserving supported measurements does not guarantee identical pagination across rendering engines. Exporting an external format does not preserve all OpenDraft metadata; use `.odraft` for a full working copy.
+Margins that leave no printable area are treated as damaged: the script still imports, on OpenDraft's default page layout, with a warning. On export, an indent that would reach into the margin is written only when the source file asked for one; otherwise it is clamped to the margin, as the editor draws it (the standard template's 7.5" right edge lies past A4's text column). Unsupported line-spacing multipliers, keep-with-next choices and source style/settings attributes are retained in source metadata where possible and reported as warnings. Custom styles may be mapped to a built-in element; their per-paragraph appearance is not guaranteed. Unsupported document sections and application-specific data can still be lost. Preserving supported measurements does not guarantee identical pagination across rendering engines. Exporting an external format does not preserve all OpenDraft metadata; use `.odraft` for a full working copy.
 
 ## Saving an original
 
-Opening successfully never establishes lossless compatibility. Saving over an external screenplay requires a review with import warnings and three choices:
+Opening successfully never establishes lossless compatibility. The first time OpenDraft would overwrite another application's file, it asks, with the import warnings and three choices:
 
 - **Save a Copy** opens a separate save/export operation with a different suggested name. It does not mark the original as updated. Use **Save As** to keep a full `.odraft` working copy.
 - **Cancel** leaves the original unchanged.
 - **Overwrite Original** requires checking an acknowledgement of potential information loss.
 
-Replacement output is parsed before asking for consent. Desktop saves write and verify a unique temporary file beside the destination, create and verify a byte-for-byte original backup, then rename the temporary file over the destination. A failed backup or replacement aborts the save; there is no delete-original fallback. Backups are in `.opendraft-originals` beside the source. Copy the desired timestamped version back using the file manager. Backups are not automatically pruned.
+Replacement output is parsed before asking for consent. Desktop saves write and verify a unique temporary file beside the destination, create and verify a byte-for-byte original backup, then rename the temporary file over the destination. A failed backup or replacement aborts the save; there is no delete-original fallback. Backups are in `.opendraft-originals` beside the source (beside the real file when the path is a symlink). Copy the desired timestamped version back using the file manager. The newest five backups of each file are kept.
 
-On iOS and Android, provider writes may not support atomic replacement. OpenDraft first reads the original bytes and persists a verified copy in its `source-backups` application-data folder. **File → Recover Original File** exports those raw bytes without replacing the working document or deleting the backup. Backups are local to the device; removing app data also removes them.
+The question is asked once per file. After an approved overwrite the file holds OpenDraft's own output, so later saves of it neither ask nor back up again — on the desktop for as long as the file's modification time still matches OpenDraft's last save. If another application changes the file, the next save is a first overwrite again: it asks, and backs the changed file up. Exporting over an existing file does not ask a second time after the system save dialog's own replace prompt; the file is still backed up first. A file with more than one hard link is written in place, so every name keeps seeing it.
 
-Background saves keep external source files pending instead of repeatedly prompting or silently overwriting them. Use Save for explicit review of a linked file, or keep a native working copy. Library autosaves remain available.
+On iOS and Android, provider writes may not support atomic replacement. Before the first overwrite of another application's file, OpenDraft reads the original bytes and persists a verified copy in its `source-backups` application-data folder. **File → Recover Original File** exports those raw bytes without replacing the working document or deleting the backup. Backups are local to the device; removing app data also removes them.
+
+Background saves never ask. Auto-save of a file opened from disk skips another application's file until the writer has approved overwriting it once, then saves it normally. In a project folder, a file OpenDraft created, or has written since the writer approved it, is saved in the background like any other; a file found in the folder that OpenDraft has only read stays pending until the writer's Save reviews it once. Which files OpenDraft last wrote is recorded per device, so a file changed elsewhere is never mistaken for OpenDraft's own output.
 
 ## Desktop file associations
 
@@ -30,7 +32,7 @@ OpenDraft owns `.odraft`. macOS registers other supported screenplay formats at 
 
 ## Validation limits
 
-Automated tests cover repeated Letter/A4 OSF and Fade In conversions, inherited styles, source settings, saved-template restoration, linked serialization, consent/cancellation and failed original-file replacement. Browser checks exercise the real overwrite dialog and editor CSS in a multi-page harness. Windows/macOS installation, mobile document-provider recovery and cross-application rendering still require device testing.
+Automated tests cover repeated Letter/A4 OSF and Fade In conversions, inherited styles, source settings, saved-template restoration, linked serialization, consent/cancellation and failed original-file replacement. Browser checks exercise the real overwrite dialog and editor CSS in a multi-page harness. The save rules above were also exercised in an unsigned macOS build, on files from `test-script/pr185_fixtures.py`: cancel, first overwrite, repeated saves, a change made by another application, Save a Copy, export over the file, auto-save before and after approval, and a symlinked file. Windows/macOS installation, mobile document-provider recovery and cross-application rendering still require device testing.
 
 ## UI screenshots
 
