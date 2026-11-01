@@ -191,7 +191,7 @@ import VersionHistory from './VersionHistory';
 import AssetManager from './AssetManager';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useGoBack, useGoBackTo } from '../hooks/useGoBack';
-import { setPendingSaveFlush } from '../services/pendingSave';
+import { setPendingSaveFlush, leaveEditor as leaveEditorScreen } from '../services/pendingSave';
 import OpenFile from './OpenFile';
 import type { OpenSource } from './OpenFile';
 import WelcomeDialog, { type WelcomeChoice } from './WelcomeDialog';
@@ -4486,6 +4486,29 @@ const ScreenplayEditor: React.FC = () => {
     [guardOpen, openScriptInThisWindow, setOpenFileOpen],
   );
 
+  // File › Open's links to Manage Projects. Through the leave guard, like the
+  // menu's own Manage Projects…, so unsaved work is saved or asked about first.
+  const handleOpenFileManageProjects = useCallback((source: OpenSource) => {
+    setOpenFileOpen(false);
+    // Land on the tab the writer was browsing, not whichever one was last used.
+    try { localStorage.setItem('opendraft:projectSource', source); } catch { /* private mode */ }
+    void leaveEditorScreen(() => navigate('/projects'));
+  }, [navigate, setOpenFileOpen]);
+
+  const handleOpenFileManageProject = useCallback(
+    (project: import('../services/api').ProjectInfo, source: OpenSource) => {
+      setOpenFileOpen(false);
+      // ProjectView routes its reads by this marker; a cloud project reached
+      // from here, without the Projects list having listed it, needs it set.
+      if (source === 'cloud') useProjectStore.getState().markCloudProject(project.id);
+      try { localStorage.setItem('opendraft:projectSource', source); } catch { /* private mode */ }
+      // No `from`: the entry behind is the editor, not the Projects list, so
+      // the project's back control must replace to /projects, not pop.
+      void leaveEditorScreen(() => navigate(`/project/${project.id}`));
+    },
+    [navigate, setOpenFileOpen],
+  );
+
   const handleWelcomeChoice = useCallback(async (choice: WelcomeChoice) => {
     setShowWelcome(false);
     localStorage.setItem('opendraft:welcomed', 'true');
@@ -5846,6 +5869,8 @@ const ScreenplayEditor: React.FC = () => {
         <OpenFile
           onOpen={handleOpenFile}
           onClose={() => setOpenFileOpen(false)}
+          onManageProjects={handleOpenFileManageProjects}
+          onManageProject={handleOpenFileManageProject}
         />
       )}
       {!isHistoryMode && <VoiceProviderDialog />}

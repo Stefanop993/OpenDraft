@@ -103,7 +103,7 @@
 
     <h2 id="projects-screen">The Projects Screen</h2>
 
-    <p>The <strong>Projects</strong> screen is where you create, open, organize and delete your projects. OpenDraft opens in the editor, so to get here choose <strong>Tools &gt; Manage Projects&hellip;</strong>.</p>
+    <p>The <strong>Projects</strong> screen is where you create, open, organize and delete your projects. OpenDraft opens in the editor, so to get here choose <strong>File &gt; Manage Projects&hellip;</strong> (it is also under <strong>Tools</strong>). The <strong>File &gt; Open Script&hellip;</strong> dialog links here too: <strong>Manage Projects&hellip;</strong> at the bottom, and <strong>Manage</strong> beside each project&rsquo;s name to go straight to that project.</p>
 
     <p>On the desktop and mobile apps, the switch at the top of the screen chooses which projects you see: <strong>This device</strong> for projects stored locally, or <strong>OpenDraft Cloud</strong> for projects in your cloud account. In the browser, every project is stored in the cloud, so there is no switch.</p>
 
@@ -288,7 +288,7 @@
     <p>This works the same for projects on your device and in OpenDraft Cloud.</p>
 
     <ol class="steps">
-      <li>Choose <strong>Tools &gt; Manage Projects&hellip;</strong>.</li>
+      <li>Choose <strong>File &gt; Manage Projects&hellip;</strong>.</li>
       <li>Pick <strong>This device</strong> or <strong>OpenDraft Cloud</strong> at the top, depending on where the project is stored.</li>
       <li>Click or tap the <strong>&#8942;</strong> (More actions) button on the project&rsquo;s card.</li>
       <li>Choose <strong>Delete</strong>, then confirm.</li>
@@ -303,17 +303,33 @@
 
     <p>To keep a copy first, open the project and use <strong>Export Project</strong> (see <a href="#export-import-project">Exporting and Importing a Project</a>).</p>
 
+    <p>When you delete the last script in a project, OpenDraft asks whether to delete the now-empty project as well. <strong>Keep Project</strong> is the default, for when you plan to start a new draft there.</p>
+
     <h2 id="delete-script">Deleting a Script</h2>
 
-    <p>To remove one script, such as an old draft, and keep the rest of the project:</p>
+    <p>To remove one script, such as an old draft, and keep the rest of the project, delete it from the editor or from its project.</p>
+
+    <h3 id="delete-script-editor">From the Editor</h3>
 
     <ol class="steps">
-      <li>Open the project from <strong>Tools &gt; Manage Projects&hellip;</strong>.</li>
+      <li>With the script open, choose <strong>File &gt; Delete Script&hellip;</strong>.</li>
+      <li>Type the script&rsquo;s name in the box. Capital letters and extra spaces don&rsquo;t matter.</li>
+      <li>Click <strong>Delete Script</strong>.</li>
+    </ol>
+
+    <p>You then land in the script&rsquo;s project, with the scripts that are left. <strong>Delete Script&hellip;</strong> is greyed out for a script that has never been saved to a project, and for a file opened from disk with <strong>Open File from Disk&hellip;</strong>.</p>
+
+    <h3 id="delete-script-project">From the Project</h3>
+
+    <p>Quicker for clearing out several drafts at once:</p>
+
+    <ol class="steps">
+      <li>Open the project from <strong>File &gt; Manage Projects&hellip;</strong>.</li>
       <li>Click or tap the <strong>&#8942;</strong> button on the script, in either list or card view.</li>
       <li>Choose <strong>Delete</strong>, then confirm.</li>
     </ol>
 
-    <p>The script is removed from the project, and this cannot be undone. If the script is also saved to a file on disk, the dialog asks whether to delete that file too. The file stays unless you tick the box.</p>
+    <p>Either way, the script is removed from the project, and this cannot be undone. A cloud script is removed on every device. If the script is also saved to a file on disk, the dialog asks whether to delete that file too. The file stays unless you tick the box.</p>
 
     <div class="page-nav">
       <a href="revision-mode.html">

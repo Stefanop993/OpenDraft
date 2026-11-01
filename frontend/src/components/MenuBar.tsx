@@ -227,12 +227,15 @@ import {
   FaPuzzlePiece,
   FaLayerGroup,
   FaUserEdit,
+  FaTrashAlt,
 } from 'react-icons/fa';
 import { REVISION_COLORS, nextRevisionColor } from '../editor/revisionColors';
 import RevisionSettingsDialog from './RevisionSettingsDialog';
 import ReportsDialog from './ReportsDialog';
 import SidesDialog, { type SidesIntent } from './SidesDialog';
 import PdfSecurityDialog, { type PdfSecurityRequest } from './PdfSecurityDialog';
+import DeleteScriptDialog from './DeleteScriptDialog';
+import { confirmTargetName } from '../utils/deleteConfirm';
 import { sanitizeExportFilename } from '../utils/exportFilename';
 import type { PluginExporter } from '../plugins/registry';
 import ScriptProfileDialog from './ScriptProfileDialog';
@@ -1117,6 +1120,18 @@ const MenuBar: React.FC<MenuBarProps> = ({
   const [revisionSettingsOpen, setRevisionSettingsOpen] = useState(false);
   const [reportsOpen, setReportsOpen] = useState(false);
   const [pdfSecurityOpen, setPdfSecurityOpen] = useState(false);
+  // File › Delete Script…: what the dialog shows, captured when it opens so a
+  // later change to the editor cannot retarget the delete.
+  const [deleteScriptInfo, setDeleteScriptInfo] = useState<{
+    projectId: string;
+    projectName: string;
+    scriptId: string;
+    title: string;
+    source: 'local' | 'cloud';
+    pageCount: number | null;
+    updatedAt: string | null;
+    linkedFilePath: string | null;
+  } | null>(null);
   /** The document Sides was opened on. Its scene indices are what the dialog
    *  selects by, so the export has to lay out this same document. */
   const [sidesDoc, setSidesDoc] = useState<JSONContent | null>(null);
@@ -1727,6 +1742,79 @@ const MenuBar: React.FC<MenuBarProps> = ({
       showToast('Document closed', 'success');
     });
   }, [confirmOrRun, editor, resetForNewScreenplay]);
+
+  // ── File › Delete Script… ──
+  // Only a script in the library: a file opened in place has nothing there to
+  // delete, and deleting the writer's own file from a menu is not this item.
+  const canDeleteScript = Boolean(currentProject && currentScriptId) && !hasFileOrigin && !isCollabGuest;
+
+  const handleOpenDeleteScript = useCallback(async () => {
+    const project = currentProject;
+    const scriptId = currentScriptId;
+    const ed = useEditorStore.getState();
+    if (!project || !scriptId || ed.documentOrigin) return;
+    const ps = useProjectStore.getState();
+    const source: 'local' | 'cloud' = ps.isCloudScript(project.id, scriptId) ? 'cloud' : 'local';
+    const meta = ps.scripts.find((s) => s.id === scriptId);
+    let linkedFilePath: string | null = null;
+    if (isDesktopTauri() && source === 'local') {
+      try {
+        const lf = await import('../services/linkedFiles');
+        linkedFilePath = (await lf.getLink(scriptId))?.path ?? null;
+      } catch (err) {
+        // Without the link the dialog just leaves out "also delete the file";
+        // the file is then kept, which is the safe way to be wrong.
+        console.warn('[delete-script] could not read the linked file', err);
+      }
+    }
+    setDeleteScriptInfo({
+      projectId: project.id,
+      projectName: project.name,
+      scriptId,
+      title: meta?.title || ed.documentTitle || '',
+      source,
+      pageCount: ed.pageCount || meta?.page_count || null,
+      updatedAt: meta?.updated_at ?? null,
+      linkedFilePath,
+    });
+  }, [currentProject, currentScriptId]);
+
+  /** Delete it, clear the editor, and show what is left of the project. Throws
+   *  to the dialog, which shows the message and keeps the script open. */
+  const handleConfirmDeleteScript = useCallback(async (deleteLinkedFile: boolean) => {
+    const info = deleteScriptInfo;
+    if (!info || !editor) return;
+    if (deleteLinkedFile && info.linkedFilePath) {
+      const lf = await import('../services/linkedFiles');
+      await lf.deleteLinkedFile(info.scriptId);
+    }
+    await scriptApi.deleteScript(info.projectId, info.scriptId);
+    // The same teardown as Close Script, minus the "save first?" question —
+    // there is nothing left to save to. Clearing the project and script ids
+    // is also what stops every auto-save aimed at the deleted script.
+    resetForNewScreenplay();
+    editor.commands.setContent({ type: 'doc', content: [{ type: 'action', content: [] }] }, true);
+    clearEditorHistory(editor);
+    clearRecoverySnapshot();
+    releaseOpenDocument();
+    setDeleteScriptInfo(null);
+    if (info.source === 'cloud') useProjectStore.getState().markCloudProject(info.projectId);
+    // Replace: Back must not lead into the editor route of a script that is
+    // gone. The project page says what was deleted, and offers to delete the
+    // project too if that was its last script.
+    navigate(`/project/${info.projectId}`, {
+      replace: true,
+      state: { deletedScript: confirmTargetName(info.title) },
+    });
+  }, [deleteScriptInfo, editor, resetForNewScreenplay, navigate]);
+
+  const handleDeleteScriptOpenProject = useCallback(() => {
+    const info = deleteScriptInfo;
+    if (!info) return;
+    setDeleteScriptInfo(null);
+    if (info.source === 'cloud') useProjectStore.getState().markCloudProject(info.projectId);
+    void leaveEditor(() => navigate(`/project/${info.projectId}`));
+  }, [deleteScriptInfo, leaveEditor, navigate]);
 
   /** Picker mode: 'reset' clears project context (top-level New Screenplay);
    *  'apply-only' just applies the template, leaving the current project intact
@@ -2645,6 +2733,9 @@ const MenuBar: React.FC<MenuBarProps> = ({
           action: () => { void handleOpenFolderAsProject(); },
           disabled: isCollabGuest,
         }] : []),
+        // Also under Tools, where it has always been — but File is where people
+        // look for their files, and a reviewer could not find delete at all.
+        { icon: <FaProjectDiagram />, label: 'Manage Projects…', action: goToProjects, disabled: isCollabGuest },
         {
           // "Close Script", not "Close": the menu bar lives inside the window on
           // touch platforms, with no window chrome around it to make plain
@@ -2684,6 +2775,18 @@ const MenuBar: React.FC<MenuBarProps> = ({
           action: () => { void handleSaveToFileAs(); },
           disabled: isCollabGuest,
         }] : []),
+        { separator: true, label: '' },
+        // On its own, away from Close and Save, and confirmed by typing the
+        // script's name.
+        {
+          icon: <FaTrashAlt />,
+          label: 'Delete Script…',
+          action: () => { void handleOpenDeleteScript(); },
+          disabled: !canDeleteScript,
+          title: canDeleteScript ? undefined : hasFileOrigin
+            ? 'This file was opened from disk, not from a project'
+            : 'Save the script to a project first',
+        },
         { separator: true, label: '' },
         {
           icon: <FaFileExport />, label: 'Export',
@@ -3867,6 +3970,8 @@ const MenuBar: React.FC<MenuBarProps> = ({
               <div className="about-changelog">
               <div className="about-subsection-title">v2.8.2</div>
               <ul className="about-list">
+                <li><strong>Delete a Script From the File Menu</strong> &mdash; Deleting a draft meant finding Manage Projects under Tools and the &#8942; menu on the script&rsquo;s card, and writers could not find it. <em>File &rarr; Delete Script&hellip;</em> now deletes the script you have open, on this device or in OpenDraft Cloud. You type its name to confirm (capitals, spacing and curly dashes don&rsquo;t count against you), and land in its project with the scripts that are left. A script also saved to a file on disk asks whether to delete the file too, and keeps it unless you say so.</li>
+                <li><strong>Manage Projects, Where You Look for It</strong> &mdash; <em>Manage Projects&hellip;</em> is in the File menu as well as Tools. <em>File &rarr; Open Script&hellip;</em> links to it at the bottom, with a <em>Manage</em> link beside each project, and the delete dialog points there for clearing out several drafts at once. Deleting a project&rsquo;s last script, from either place, asks whether to delete the empty project too; keeping it is the default.</li>
                 <li><strong>Tamil PDFs Look the Way You Typed Them</strong> &mdash; Tamil looked right in the editor but came out of a PDF garbled: vowel signs landed on the wrong letter (எப்போது printed as எபேபாது), and letters such as கு, டு and ரு came out as the bare consonant with a loose hook beside it. PDF export now builds every letter from the font&rsquo;s own Tamil rules, the same way the editor does, so the PDF matches the screen &mdash; bold included &mdash; and text copied or searched in it reads as typed.</li>
                 <li><strong>Every Indian Script, Properly Joined</strong> &mdash; The same fix covers Hindi, Marathi, Bengali, Gujarati, Punjabi, Odia, Telugu, Kannada, Malayalam and Sinhala. Joined letters such as क्ष and श्र, and the reph in कर्म, now print joined instead of spelled out with a visible halant.</li>
               </ul>
@@ -4380,6 +4485,19 @@ const MenuBar: React.FC<MenuBarProps> = ({
     )}
     {pdfSecurityOpen && (
       <PdfSecurityDialog onExport={handleExportSecured} onClose={() => setPdfSecurityOpen(false)} />
+    )}
+    {deleteScriptInfo && (
+      <DeleteScriptDialog
+        scriptTitle={deleteScriptInfo.title}
+        projectName={deleteScriptInfo.projectName}
+        source={deleteScriptInfo.source}
+        pageCount={deleteScriptInfo.pageCount}
+        updatedAt={deleteScriptInfo.updatedAt}
+        linkedFilePath={deleteScriptInfo.linkedFilePath}
+        onOpenProject={handleDeleteScriptOpenProject}
+        onCancel={() => setDeleteScriptInfo(null)}
+        onConfirm={handleConfirmDeleteScript}
+      />
     )}
     {sidesDoc && (
       <SidesDialog
