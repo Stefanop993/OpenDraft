@@ -165,7 +165,7 @@ describe('source geometry and supported element rules', () => {
       expect(parsed.elementRules?.dialogue?.leftIndent).toBeCloseTo(365 / 254);
       expect(parsed.elementRules?.dialogue?.marginTop).toBe(18);
     });
-  it('defaults only missing settings, warns on invalid measurements, and rejects impossible margins', () => {
+  it('defaults only missing settings, warns on invalid measurements, and falls back from impossible margins', () => {
     expect(
       parseOSF('<document><paragraphs/></document>').pageLayout?.pageWidth,
     ).toBeUndefined();
@@ -174,9 +174,38 @@ describe('source geometry and supported element rules', () => {
         source().replace('page_width="2100"', 'page_width="bad"'),
       ).warnings.join(' '),
     ).toContain('Invalid OSF setting page_width');
-    expect(() =>
-      parseOSF(source().replace('margin_left="390"', 'margin_left="9999"')),
-    ).toThrow('printable page area');
+    // A damaged margin costs the margins, not the script.
+    const damaged = parseOSF(source().replace('margin_left="390"', 'margin_left="9999"'));
+    expect(damaged.warnings.join(' ')).toContain('no printable page area');
+    expect(damaged.pageLayout?.leftMargin).toBeUndefined();
+    expect(damaged.pageLayout?.pageWidth).toBeCloseTo(2100 / 254);
+    expect(damaged.doc.content?.length).toBeGreaterThan(0);
+  });
+  it('never writes a negative indent the source did not have', () => {
+    // A4 with the standard template: its 7.5" right edge lies past A4's text
+    // column, which the editor clamps to the margin. So does the file.
+    const a4 = { ...DEFAULT_PAGE_LAYOUT, pageWidth: 8.27, pageHeight: 11.69, rightMargin: 1 };
+    const xml = exportOSF(parseOSF(source()).doc, { pageLayout: a4 });
+    const indents = [...xml.matchAll(/(left|right)indent="(-?\d+)"/g)].map((m) => Number(m[2]));
+    expect(indents.length).toBeGreaterThan(0);
+    expect(indents.every((n) => n >= 0)).toBe(true);
+
+    // A file that leaves Action's right indent out keeps it at the margin.
+    const sparse = source().replace(' rightindent="100"', '');
+    const p = parseOSF(sparse);
+    const out = exportOSF(p.doc, {
+      pageLayout: { ...DEFAULT_PAGE_LAYOUT, ...p.pageLayout },
+      elementRules: importedFormat(p.elementRules ?? {}).rules,
+    });
+    expect(out).toMatch(/<style[^>]*name="Action"[^>]*rightindent="0"/);
+  });
+  it('keeps a negative indent the source asked for', () => {
+    const p = parseOSF(source());
+    const xml = exportOSF(p.doc, {
+      pageLayout: { ...DEFAULT_PAGE_LAYOUT, ...p.pageLayout },
+      elementRules: importedFormat(p.elementRules ?? {}).rules,
+    });
+    expect(xml).toMatch(/<style[^>]*name="Dialogue"[^>]*leftindent="-25"/);
   });
   it('emits a single scene setting when retained settings and current options overlap', () => {
     const p = parseOSF(source());

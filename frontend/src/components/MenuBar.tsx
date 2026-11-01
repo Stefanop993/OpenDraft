@@ -471,11 +471,13 @@ const MenuBar: React.FC<MenuBarProps> = ({
     // means the writer kept typing while the file was written — and those
     // edits are not in it. Edits made during 'saving' do not mark the document
     // unsaved on their own, so this is the only thing that would notice.
-    if (auto && externalScreenplay(origin.name)) return false;
     const docBefore = editor?.state.doc;
     setSaveStatus('saving');
     try {
-      await saveDocumentInPlace(origin.bookmark, await serializeForOrigin(origin.format), { name: origin.name, warnings: origin.warnings });
+      // An automatic save never asks: until the writer has agreed to overwrite
+      // another application's file once, it is skipped and the document stays
+      // unsaved (ExternalSaveCancelled, below).
+      await saveDocumentInPlace(origin.bookmark, await serializeForOrigin(origin.format), { name: origin.name, warnings: origin.warnings, background: auto });
       // The writer may have opened something else while the write was in
       // flight; the status now belongs to that document, not this one.
       if (useEditorStore.getState().documentOrigin?.bookmark !== origin.bookmark) return true;
