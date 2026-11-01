@@ -107,4 +107,5 @@ A complete list of features in OpenDraft.
 ## Extensibility
 
 - **Plugin Architecture** -- Extend OpenDraft with custom plugins: menu items, panels, routes, editor extensions, and importers, exporters and reports that join the built-in File and Analytics menus
+- **Add-ons** -- Optional plugins, off until you turn them on in Settings → Add-ons. Turning one on shows what it does, what (if anything) leaves your device, and its settings; turning it off removes everything it added and can delete what it stored. AI features are only ever offered this way
 - **Open API** -- FastAPI backend with documented endpoints
