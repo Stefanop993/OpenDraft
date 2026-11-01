@@ -1,16 +1,10 @@
-Your scripts from other apps, kept the way they were.
+Tidy up your drafts, and PDFs that read right in Indian languages.
 
-FADE IN SCRIPTS KEEP THEIR LAYOUT
-Fade In scripts now open with their own page size, margins and formatting, and keep them when you save, so a script that goes back and forth no longer changes shape.
+DELETE A DRAFT FROM THE FILE MENU
+File > Delete Script removes the script you have open, whether it's on this device or in OpenDraft Cloud. Type its name to confirm, and you're taken back to its project.
 
-YOUR ORIGINALS ARE SAFE
-Before saving over a Final Draft, Fade In or Fountain file for the first time, OpenDraft asks whether to save a copy instead, and backs up the original first.
+YOUR PROJECTS, EASIER TO FIND
+Manage Projects is now in the File menu, and the Open screen links to it, so renaming and deleting projects and drafts is always close at hand. When you delete a project's last draft, OpenDraft offers to remove the empty project too.
 
-YOUR DEFAULT APPS STAY YOURS
-OpenDraft no longer makes itself the default for other apps' screenplay files or for plain text files. It's still there under Open With.
-
-DUAL DIALOGUE IN WORD
-Side-by-side dialogue now comes through in Word exports, and back again when you import them.
-
-ALSO FIXED
-New scripts start on US Letter, as the manual says. Several fixes to suggesting changes during collaboration.
+TAMIL AND OTHER INDIAN LANGUAGES IN PDF
+Tamil now looks the same in a PDF as it does on screen. Hindi, Marathi, Bengali, Gujarati, Punjabi, Odia, Telugu, Kannada, Malayalam and Sinhala get the same fix, with joined letters printed properly.
