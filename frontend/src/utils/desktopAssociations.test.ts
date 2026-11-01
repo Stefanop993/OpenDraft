@@ -5,6 +5,7 @@ const read = (name: string) =>
   readFileSync(new URL(`../../../src-tauri/${name}`, import.meta.url), 'utf8');
 const config = JSON.parse(read('tauri.conf.json'));
 const windows = JSON.parse(read('tauri.windows.conf.json'));
+const linux = JSON.parse(read('tauri.linux.conf.json'));
 const external = [
   'fdx',
   'fadein',
@@ -55,13 +56,62 @@ describe('installer association ownership', () => {
     );
     expect(components.sort()).toEqual([...refs].sort());
   });
-  it('keeps NSIS uninstall scoped to its own named registrations', () => {
+  it('keeps NSIS registrations to its own named entries, outside the 2.8.0 cleanup', () => {
     const hooks = read('nsis-hooks.nsh');
-    expect(hooks).not.toMatch(/UserChoice|\\\.txt/);
-    for (const line of hooks
+    expect(hooks).not.toMatch(/UserChoice/);
+    // Everything after the legacy cleanup macro is the current installer's own.
+    const own = hooks.slice(hooks.indexOf('!macro OpenDraftRemoveLegacyAssociations'));
+    for (const line of own
       .split('\n')
       .filter((l) => /WriteRegStr|DeleteReg/.test(l))) {
       expect(line).toMatch(/OpenDraft\.Alternative|OpenWithProgids/);
     }
+  });
+  it('undoes 2.8.0\'s associations only where they are still its own, and never sets OpenDraft as a default', () => {
+    const hooks = read('nsis-hooks.nsh');
+    const start = hooks.indexOf('!macro OpenDraftRemoveLegacyAssociation ');
+    const legacy = hooks.slice(start, hooks.indexOf('!macroend', start));
+    // Guarded by the exact open command 2.8.0's installer wrote for this copy.
+    expect(legacy).toContain("${If} $R0 == '$INSTDIR\\${MAINBINARYNAME}.exe $\\\"%1$\\\"'");
+    // The only default it writes is the one it restores ($R2: the backup or Windows' own).
+    const writes = legacy.split('\n').filter((l) => /WriteRegStr/.test(l));
+    expect(writes).toEqual([expect.stringContaining('"Software\\Classes\\.${EXT}" "" "$R2"')]);
+    // Every extension 2.8.0 registered is cleaned up, on update and on uninstall.
+    for (const ext of [...external, 'txt'])
+      expect(hooks).toMatch(new RegExp(`OpenDraftRemoveLegacyAssociation ${ext} `));
+    expect(hooks).toMatch(/OpenDraftRemoveLegacyAssociation txt "txtfile"/);
+    for (const hook of ['NSIS_HOOK_POSTINSTALL', 'NSIS_HOOK_PREUNINSTALL']) {
+      const body = hooks.slice(hooks.indexOf(`!macro ${hook}`));
+      expect(body.slice(0, body.indexOf('!macroend'))).toContain('OpenDraftRemoveLegacyAssociations');
+    }
+  });
+});
+
+describe('Linux file types', () => {
+  const entries = linux.bundle.fileAssociations as Array<{ ext: string[]; mimeType: string }>;
+  const mime = new DOMParser().parseFromString(read('linux/opendraft-mime.xml'), 'application/xml');
+  const types = Array.from(mime.getElementsByTagName('mime-type'));
+  it('never claims generic text, XML, ZIP or JSON files', () => {
+    for (const { mimeType } of entries)
+      expect(['text/plain', 'application/xml', 'application/zip', 'application/json']).not.toContain(mimeType);
+    expect(entries.flatMap((e) => e.ext)).not.toContain('txt');
+  });
+  it('defines its own type for every extension it lists', () => {
+    expect(entries.flatMap((e) => e.ext).sort()).toEqual(['odraft', ...external].sort());
+    for (const { ext, mimeType } of entries) {
+      const def = types.find((t) => t.getAttribute('type') === mimeType);
+      expect(def, mimeType).toBeDefined();
+      const globs = Array.from(def!.getElementsByTagName('glob')).map((g) => g.getAttribute('pattern'));
+      expect(globs).toEqual(ext.map((e) => `*.${e}`));
+      expect(def!.getElementsByTagName('sub-class-of')).toHaveLength(1);
+    }
+  });
+  it('installs the types with every Linux package and passes the opened file', () => {
+    const { deb, rpm, appimage } = linux.bundle.linux;
+    for (const pkg of [deb, rpm, appimage])
+      expect(pkg.files['/usr/share/mime/packages/opendraft.xml']).toBe('linux/opendraft-mime.xml');
+    expect(deb.desktopTemplate).toBe('linux/opendraft.desktop');
+    expect(rpm.desktopTemplate).toBe('linux/opendraft.desktop');
+    expect(read('linux/opendraft.desktop')).toMatch(/^Exec=\{\{exec\}\} %F$/m);
   });
 });
