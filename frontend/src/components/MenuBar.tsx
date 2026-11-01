@@ -3865,6 +3865,11 @@ const MenuBar: React.FC<MenuBarProps> = ({
             <div className="about-whats-new">
               <div className="about-section-title">What's New in 2.8.1</div>
               <div className="about-changelog">
+              <div className="about-subsection-title">v2.8.2</div>
+              <ul className="about-list">
+                <li><strong>Tamil PDFs Look the Way You Typed Them</strong> &mdash; Tamil looked right in the editor but came out of a PDF garbled: vowel signs landed on the wrong letter (எப்போது printed as எபேபாது), and letters such as கு, டு and ரு came out as the bare consonant with a loose hook beside it. PDF export now builds every letter from the font&rsquo;s own Tamil rules, the same way the editor does, so the PDF matches the screen &mdash; bold included &mdash; and text copied or searched in it reads as typed.</li>
+                <li><strong>Every Indian Script, Properly Joined</strong> &mdash; The same fix covers Hindi, Marathi, Bengali, Gujarati, Punjabi, Odia, Telugu, Kannada, Malayalam and Sinhala. Joined letters such as क्ष and श्र, and the reph in कर्म, now print joined instead of spelled out with a visible halant.</li>
+              </ul>
               <div className="about-subsection-title">v2.8.1</div>
               <ul className="about-list">
                 <li><strong>Fade In Scripts Keep Their Layout</strong> &mdash; A Fade In <code>.fadein</code> or Open Screenplay Format <code>.osf</code> file now opens with its own page size and margins, and each element keeps its indents, spacing, alignment and styles. The title page uses the same page. Saving or exporting writes the script&rsquo;s actual settings back, instead of a fixed US Letter layout, so a script that goes back and forth between Fade In and OpenDraft no longer drifts (#181).</li>
