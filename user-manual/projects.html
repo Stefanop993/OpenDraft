@@ -103,7 +103,9 @@
 
     <h2 id="projects-screen">The Projects Screen</h2>
 
-    <p>When you open OpenDraft, you land on the <strong>Projects</strong> screen. This is your home base for all your work.</p>
+    <p>The <strong>Projects</strong> screen is where you create, open, organize and delete your projects. OpenDraft opens in the editor, so to get here choose <strong>Tools &gt; Manage Projects&hellip;</strong>.</p>
+
+    <p>On the desktop and mobile apps, the switch at the top of the screen chooses which projects you see: <strong>This device</strong> for projects stored locally, or <strong>OpenDraft Cloud</strong> for projects in your cloud account. In the browser, every project is stored in the cloud, so there is no switch.</p>
 
     <div class="screenshot">
       <img src="../images/macos/project_appstore.png" alt="Projects screen showing project cards with names, script counts, and pin/color/delete actions">
@@ -248,7 +250,7 @@
       <li><strong>Sort scripts</strong> &mdash; By title, created date, modified date, size, page count, or custom drag-and-drop order</li>
       <li><strong>Pin scripts</strong> &mdash; Keep important scripts at the top</li>
       <li><strong>Color-code scripts</strong> &mdash; Assign colors for visual identification</li>
-      <li><strong>Delete scripts</strong> &mdash; Remove scripts you no longer need</li>
+      <li><strong>Rename or delete scripts</strong> &mdash; Use the <strong>&#8942;</strong> button on the script (see <a href="#delete-script">Deleting a Script</a>)</li>
     </ul>
 
     <h3 id="assets-tab">Assets Tab</h3>
@@ -283,14 +285,35 @@
 
     <h2 id="delete-project">Deleting a Project</h2>
 
-    <p>Hover over a project in the Projects list and click the delete button. You will be asked to confirm.</p>
+    <p>This works the same for projects on your device and in OpenDraft Cloud.</p>
+
+    <ol class="steps">
+      <li>Choose <strong>Tools &gt; Manage Projects&hellip;</strong>.</li>
+      <li>Pick <strong>This device</strong> or <strong>OpenDraft Cloud</strong> at the top, depending on where the project is stored.</li>
+      <li>Click or tap the <strong>&#8942;</strong> (More actions) button on the project&rsquo;s card.</li>
+      <li>Choose <strong>Delete</strong>, then confirm.</li>
+    </ol>
 
     <div class="callout callout-danger">
       <span class="callout-icon">&#9888;&#65039;</span>
       <div class="callout-content">
-        <p><strong>Warning:</strong> Deleting a project removes all its scripts, assets, and version history from OpenDraft. This cannot be undone. For a project saved in a folder, the files in the folder are left where they are.</p>
+        <p><strong>Warning:</strong> Deleting a project removes all its scripts, assets, and version history from OpenDraft. This cannot be undone. A cloud project is deleted from your cloud account, on every device you use. For a project saved in a folder, the files in the folder are left where they are.</p>
       </div>
     </div>
+
+    <p>To keep a copy first, open the project and use <strong>Export Project</strong> (see <a href="#export-import-project">Exporting and Importing a Project</a>).</p>
+
+    <h2 id="delete-script">Deleting a Script</h2>
+
+    <p>To remove one script, such as an old draft, and keep the rest of the project:</p>
+
+    <ol class="steps">
+      <li>Open the project from <strong>Tools &gt; Manage Projects&hellip;</strong>.</li>
+      <li>Click or tap the <strong>&#8942;</strong> button on the script, in either list or card view.</li>
+      <li>Choose <strong>Delete</strong>, then confirm.</li>
+    </ol>
+
+    <p>The script is removed from the project, and this cannot be undone. If the script is also saved to a file on disk, the dialog asks whether to delete that file too. The file stays unless you tick the box.</p>
 
     <div class="page-nav">
       <a href="revision-mode.html">
