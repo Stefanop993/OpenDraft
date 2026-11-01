@@ -59,6 +59,7 @@ A complete list of features in OpenDraft.
 
 ## Import & Export
 
+- **Dual dialogue in Word** -- Both speeches export in side-by-side columns with inline formatting and return as dual dialogue when imported. Long exchanges use Word's pagination.
 - **Final Draft (.fdx)** -- Import and export
 - **Fountain (.fountain)** -- Import and export
 - **Fade In (.fadein) / Open Screenplay Format (.osf)** -- Import and export, carrying elements, emphasis, colour, fonts, page breaks, scene numbers, synopses, dual dialogue and the title page
