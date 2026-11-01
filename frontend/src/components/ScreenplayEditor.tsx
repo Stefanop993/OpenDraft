@@ -2108,7 +2108,7 @@ const ScreenplayEditor: React.FC = () => {
       }),
       Alternates.configure({
         isCollaborating: () => alternatesCollabRef.current,
-        onBlocked: () => showToast('End the collaboration session before adding, switching or deleting alternate versions. You can still edit the version shown.', 'info'),
+        onBlocked: () => showToast('Alternate versions can\'t be added, switched or deleted during a live session. End the session (or leave it) first. You can still edit the version shown.', 'info'),
       }),
       // While suggesting, edits become suggestions (editor/suggestions).
       Suggestions.configure({
